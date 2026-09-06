@@ -61,6 +61,49 @@ librime 自身的用户词典被禁用。中文候选选择的拼音输入码和
 内置全拼使用 `express_editor`：选中覆盖全部输入的候选后直接提交，分段选择继续保留剩余组合；
 `Return` 显式绑定 `commit_composition`。随包资源版本变化会重新部署配置，不改变加密用户数据格式。
 
+## Private text collection
+
+`app/clipboard/ClipboardImportActivity` is an exported, input-only adapter for
+Android text processing and text sharing. `ClipboardImportIntent` validates
+untrusted payloads and removes formatting; `ClipboardImportRequest` owns one
+bounded mutable draft and its review/authentication/confirmation/save lifecycle.
+`ClipboardImportView` presents only that draft, never existing vault metadata.
+The existing AuthenticationBroker issues a one-use grant; a subsequent foreground
+Save action schedules the addition on a bounded worker. No authentication callback
+persists data by itself, and callers receive no result data.
+
+`user-data/SecureClipboardVault` still owns the encrypted format and serializes
+reads/writes. It accepts the existing security EncryptedStore port for isolated
+tests. Additions capture a deletion generation before queuing and check it and
+cancellation under the vault lock before reading and before committing. No IME,
+engine or system clipboard dependency is introduced. See [ADR 0006](adr/0006-private-text-import.md).
+
+## Opt-in system clipboard guard
+
+`app/clipboardguard` owns this platform-only feature, independently of the private
+vault. `ClipboardGuardOptions` and `ClipboardGuardSession` define a body-free
+policy with a minimal `SystemClipboardPort` (timestamp, clear, subscription).
+`AndroidSystemClipboard` is the sole production adapter allowed by privacyCheck.
+No guard dependency is added to user-data, security, engine-api or ime-core.
+
+`ClipboardGuardRuntime` owns a bounded serial worker and immutable view state.
+ZeroInputService attaches/detaches its lifecycle and observes state for the optional
+fixed-height ime-ui reminder. Clipboard work and initial guard preference loading
+never run on the input thread; settings are read as one atomic value snapshot.
+Preferences, default-IME changes and service detachment invalidate the worker's
+lease before queued destructive operations can run. Event and refresh wake-ups
+are coalesced; clear submissions are bounded to one. Subscription startup records
+only a baseline and ignores existing content. Runtime tests inject a synthetic
+metadata port and default-IME predicate without accessing the platform clipboard.
+
+The nonexported settings and clear Activities expose separate reminder, cleanup
+and authentication choices. Notifications request permission only on user opt-in,
+contain generic status, and open a page through an immutable PendingIntent.
+Authentication uses the existing one-use grant with a distinct allowlisted title;
+successful authentication still requires foreground confirmation. This adds no
+encrypted format, persisted ticket, secret cache, polling or background service.
+See [ADR 0007](adr/0007-system-clipboard-guard.md) for public-API limitations.
+
 ## User lexicon persistence and transfer
 
 `UserLexiconRepository` depends on the small `security/EncryptedStore` port;

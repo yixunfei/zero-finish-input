@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="clipboard_guard_open">System clipboard guard</string>
+    <string name="clipboard_guard_changed">System clipboard changed</string>
     <string name="keyboard_settings">zero finish input settings</string>
     <string name="secure_clipboard_item">%1$s</string>
     <string name="secure_clipboard_item_description">Authenticate and paste %1$s</string>

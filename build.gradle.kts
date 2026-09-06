@@ -5,18 +5,59 @@ plugins {
     alias(libs.plugins.kotlin.jvm) apply false
 }
 
+fun systemClipboardViolation(path: String, text: String): String? {
+    if (Regex("\\bgetPrimaryClip\\b|\\.primaryClip\\b").containsMatchIn(text)) {
+        return "Reading system clipboard payloads is forbidden everywhere"
+    }
+    val capabilities = Regex("\\bClipboardManager\\b|\\bCLIPBOARD_SERVICE\\b|\\b(?:add|remove)PrimaryClipChangedListener\\b|\\b(?:clear|set|has)PrimaryClip\\b|\\b(?:getPrimaryClipDescription|primaryClipDescription)\\b")
+    if (!capabilities.containsMatchIn(text)) return null
+    val adapter = "app/src/main/kotlin/dev/zeroinput/ime/clipboardguard/AndroidSystemClipboard.kt"
+    val fixture = "app/src/androidTest/kotlin/dev/zeroinput/ime/clipboardguard/SystemClipboardPlatformTest.kt"
+    if (path != adapter && path != fixture) return "System clipboard capabilities are restricted to the approved adapter and fixture"
+    val writes = Regex("\\bsetPrimaryClip\\s*\\(").findAll(text).count()
+    val allowedWrite = if (path == adapter) {
+        Regex("setPrimaryClip\\(ClipData\\.newPlainText\\(\"\", \"\"\\)\\)")
+    } else {
+        Regex("setPrimaryClip\\(ClipData\\.newPlainText\\(\"\", \"public guard fixture\"\\)\\)")
+    }
+    if (writes != allowedWrite.findAll(text).count()) return "Only literal empty cleanup or the fixed public test fixture may be written"
+    return null
+}
+
+tasks.register("testPrivacyBoundary") {
+    group = "verification"
+    description = "Checks that clipboard source exceptions cannot allow payload reads or arbitrary writes."
+    doLast {
+        val adapter = "app/src/main/kotlin/dev/zeroinput/ime/clipboardguard/AndroidSystemClipboard.kt"
+        val fixture = "app/src/androidTest/kotlin/dev/zeroinput/ime/clipboardguard/SystemClipboardPlatformTest.kt"
+        val business = "app/src/main/kotlin/dev/zeroinput/ime/ZeroInputService.kt"
+        val reads = listOf("manager.getPrimaryClip()", "manager.primaryClip")
+        for (path in listOf(adapter, fixture, business)) for (read in reads) {
+            check(systemClipboardViolation(path, read) != null)
+        }
+        for (capability in listOf("ClipboardManager", "CLIPBOARD_SERVICE", "manager.primaryClipDescription",
+            "manager.hasPrimaryClip()", "manager.addPrimaryClipChangedListener(listener)", "manager.clearPrimaryClip()")) {
+            check(systemClipboardViolation(business, capability) != null)
+        }
+        val empty = "manager.setPrimaryClip(ClipData.newPlainText(\"\", \"\"))"
+        val publicFixture = "manager.setPrimaryClip(ClipData.newPlainText(\"\", \"public guard fixture\"))"
+        check(systemClipboardViolation(adapter, empty) == null)
+        check(systemClipboardViolation(fixture, publicFixture) == null)
+        check(systemClipboardViolation(adapter, publicFixture) != null)
+        check(systemClipboardViolation(business, empty) != null)
+        check(systemClipboardViolation("other/$adapter", empty) != null)
+        check(systemClipboardViolation(adapter, "$empty\nmanager.setPrimaryClip(value)") != null)
+    }
+}
+
 tasks.register("privacyCheck") {
     group = "verification"
-    description = "Rejects unexpected packaged permissions and Android system clipboard capabilities."
-    dependsOn(":app:processDebugMainManifest", ":app:processReleaseMainManifest")
+    description = "Rejects unexpected permissions, clipboard payload reads and capabilities outside the approved opt-in guard."
+    dependsOn("testPrivacyBoundary", ":app:processDebugMainManifest", ":app:processReleaseMainManifest")
 
     doLast {
         val forbidden = listOf(
             Regex("android\\.permission\\.INTERNET") to "Runtime networking is forbidden",
-            Regex("android\\.content\\.ClipboardManager") to "Use the encrypted in-app vault instead",
-            Regex("\\bCLIPBOARD_SERVICE\\b") to "Use the encrypted in-app vault instead",
-            Regex("\\bgetPrimaryClip\\s*\\(") to "Reading the Android clipboard is forbidden",
-            Regex("\\bsetPrimaryClip\\s*\\(") to "Writing the Android clipboard is forbidden",
         )
         val sourceRoots = subprojects.map { it.file("src") }
         val violations = mutableListOf<String>()
@@ -26,6 +67,8 @@ tasks.register("privacyCheck") {
                 .filter { it.isFile && it.extension in setOf("kt", "java", "xml") }
                 .forEach { file ->
                     val text = file.readText()
+                    val path = file.relativeTo(rootProject.projectDir).invariantSeparatorsPath
+                    systemClipboardViolation(path, text)?.let { violations += "$path: $it" }
                     forbidden.forEach { (pattern, reason) ->
                         if (pattern.containsMatchIn(text)) {
                             violations += "${file.relativeTo(rootProject.projectDir)}: $reason"
@@ -54,6 +97,7 @@ tasks.register("privacyCheck") {
                 val allowedPermissions = setOf(
                     "android.permission.USE_BIOMETRIC",
                     "android.permission.USE_FINGERPRINT",
+                    "android.permission.POST_NOTIFICATIONS",
                     "$packageName.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                 )
                 val permissionNames = buildSet {

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="TextAppearance.ZeroInput.GuardTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textSize">18sp</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+
     <style name="Theme.ZeroInput" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/zero_primary</item>
         <item name="colorOnPrimary">@color/zero_on_primary</item>
@@ -19,6 +24,10 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <style name="Theme.ZeroInput.PrivateImport" parent="Theme.ZeroInput">
+        <item name="android:windowDisablePreview">true</item>
     </style>
 
     <style name="Theme.ZeroInput.Authentication" parent="Theme.ZeroInput">

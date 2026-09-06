@@ -60,7 +60,9 @@ class SecureClipboardUnlockActivity : AppCompatActivity() {
     @Suppress("DEPRECATION")
     private fun createPromptInfo(): BiometricPrompt.PromptInfo {
         val builder = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(getString(R.string.unlock_secure_clipboard))
+            .setTitle(getString(if (intent.getIntExtra(EXTRA_PROMPT_TITLE, 0) == R.string.clipboard_guard_authentication_title) {
+                R.string.clipboard_guard_authentication_title
+            } else R.string.unlock_secure_clipboard))
             .setSubtitle(getString(R.string.app_name))
             .setConfirmationRequired(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -104,6 +106,7 @@ class SecureClipboardUnlockActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_REQUEST_ID = "dev.zeroinput.ime.auth.REQUEST_ID"
+        const val EXTRA_PROMPT_TITLE = "dev.zeroinput.ime.auth.PROMPT_TITLE"
 
         private const val COMBINED_AUTHENTICATORS =
             BiometricManager.Authenticators.BIOMETRIC_STRONG or

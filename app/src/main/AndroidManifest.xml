@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-feature
         android:name="android.hardware.touchscreen"
         android:required="false" />
@@ -50,6 +52,28 @@
             android:taskAffinity=""
             android:theme="@style/Theme.ZeroInput.Authentication" />
 
+        <activity
+            android:name=".clipboard.ClipboardImportActivity"
+            android:label="@string/copy_to_zeroinput"
+            android:launchMode="singleTask"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:allowTaskReparenting="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.ZeroInput.PrivateImport"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".ZeroInputService"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|locale|layoutDirection|uiMode"
@@ -66,6 +90,18 @@
                 android:name="android.view.im"
                 android:resource="@xml/method" />
         </service>
+
+        <activity
+            android:name=".clipboardguard.ClipboardGuardSettingsActivity"
+            android:exported="false"
+            android:parentActivityName=".settings.MainActivity" />
+        <activity
+            android:name=".clipboardguard.ClipboardClearActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.ZeroInput.PrivateImport" />
 
         <receiver
             android:name="androidx.profileinstaller.ProfileInstallReceiver"

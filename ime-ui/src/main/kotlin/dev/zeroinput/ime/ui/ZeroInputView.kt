@@ -31,6 +31,7 @@ class ZeroInputView @JvmOverloads constructor(
     var onEmojiSelected: (String) -> Unit = {}
     var onSecureClipboardSelected: (String) -> Unit = {}
     var onSettingsRequested: () -> Unit = {}
+    var onClipboardGuardRequested: () -> Unit = {}
     var onSecureClipboardManagementRequested: () -> Unit = {}
     /**
      * Notifies the service about UI-only interactions (panel changes and
@@ -50,6 +51,7 @@ class ZeroInputView @JvmOverloads constructor(
         dispatchKeyboardAction(KeyboardAction.SwitchLanguage)
     }
     private val candidateStrip = CandidateStripView(context)
+    private val clipboardGuard = ClipboardGuardReminderView(context).apply { onRequested = { onClipboardGuardRequested() } }
     private val expandedCandidates = ExpandedCandidatesView(context)
     private var currentSnapshot = EngineSnapshot.Empty
     private var currentLanguage = InputLanguage.CHINESE
@@ -88,6 +90,7 @@ class ZeroInputView @JvmOverloads constructor(
             insets
         }
         addView(createToolbar())
+        addView(clipboardGuard)
         addView(candidateStrip)
         content.addView(emoji)
         content.addView(secureClipboard)
@@ -133,6 +136,8 @@ class ZeroInputView @JvmOverloads constructor(
     }
 
     fun renderEngineStatus(status: InputEngineStatus) { candidateStrip.renderStatus(status) }
+
+    fun renderClipboardGuard(enabled: Boolean, changed: Boolean) { clipboardGuard.render(enabled, changed) }
 
     fun renderChineseOptions(options: ChineseInputOptions) {
         val label = context.getString(if (options.script == ChineseScript.SIMPLIFIED)

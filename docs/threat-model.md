@@ -10,9 +10,10 @@
 ## Enforced controls
 
 - Manifest 不含联网权限，CI 扫描项目源码中的联网权限和系统剪贴板 API，并解析 Debug/Release
-  合并清单执行权限白名单校验，防止依赖间接引入网络、存储或其他敏感权限。输入法服务不注册
-  剪贴板监听器；AndroidX 文本控件只可能在用户明确执行标准粘贴操作时进入系统编辑路径。
-- 除系统入口（启动页与输入法服务）外，Android 组件均不导出；输入法服务只使用系统要求的绑定权限。
+  合并清单执行权限白名单校验，防止依赖间接引入网络、存储或其他敏感权限。系统剪贴板正文
+  读取始终禁止；仅专用防护适配器可在用户开启后监听、检查时间戳和清理。AndroidX 文本控件
+  只可能在用户明确执行标准粘贴操作时进入系统编辑路径。
+- 除启动页、输入法服务和只接收待确认文本的剪贴板导入页外，Android 组件均不导出；输入法服务只使用系统要求的绑定权限。导入页不能查询或返回私有库内容。
 - `allowBackup=false` 且不启用数据提取规则。
 - 密码、PIN、可见密码及应用请求的无个性化输入上下文强制禁用学习和个性化数据读取；邮箱、
   URI、隐身模式及用户关闭学习时同样不读取个人词组或 emoji 历史。运行中收紧隐私设置会立即
@@ -114,6 +115,65 @@
   constructed public fixtures, not personal dictionary contents.
 - A failed dictionary deletion blocks further reads and writes until deletion
   succeeds, preventing a false empty export or a later update over incomplete erasure.
+
+## Private text import boundary
+
+- The exported text import Activity treats every Intent as untrusted. It accepts
+  only PROCESS_TEXT/SEND text/plain payloads of at most 8,192 UTF-16 code units;
+  malformed, blank, NUL-containing, URI/stream and unsupported payloads fail
+  closed. It discards spans and never resolves providers, links or attachments.
+- Incoming calls cannot read vault labels, entries or authentication state.
+  Authentication and a subsequent foreground Save confirmation are both required.
+  Repeated clicks/callbacks cannot save twice. A callback while the host is covered
+  cannot write. Backgrounding outside authentication, new Intents, settings changes,
+  recreation and destruction invalidate the request and clear mutable drafts.
+- FLAG_SECURE, excluded recents and disabled view/content capture protect the
+  confirmation surface. No draft is placed in saved instance state or results;
+  launch Intent references are cleared. The authentication flow has a timeout.
+- Single-task launch mode bounds the import flow to one screen. A new external
+  launch cancels the existing draft instead of replacing an authenticated payload.
+- The serial vault checks cancellation and deletion generation before reading
+  existing content and before committing an addition. A clear invalidates queued
+  imports and deletes after any already committing write. Invalid/corrupt data,
+  missing keys and rejected execution never become an empty vault to overwrite.
+- Selection menu availability belongs to the source application. The system IPC,
+  source application's own storage and text already submitted to a destination
+  remain outside ZeroInput's private storage boundary. See ADR 0006.
+
+## Optional system clipboard cleanup boundary
+
+- Monitoring and all active behaviors default off. Only the approved adapter may
+  register callbacks, inspect timestamp/empty metadata and clear the clipboard.
+  It never requests text, labels, source packages or URIs. The guard cannot query,
+  decrypt or populate the private vault. Metadata is not persisted or logged.
+- The new POST_NOTIFICATIONS permission serves an independently enabled generic
+  reminder only. Permission denial and disabled channels are visible in settings.
+  Notifications hide on the lock screen and contain no clipboard preview. Their
+  immutable PendingIntents open nonexported pages and cannot directly clear data.
+  A bounded channel, notification and cancelled stale intents prevent accumulation.
+- Automatic cleanup requires an explicit mode choice and destructive-effect
+  warning. Authentication forces confirmation mode; a biometric/credential result
+  alone cannot clear. Confirmation carries an opaque, in-memory ticket and one-use
+  grant, checks current metadata again, and expires on cancellation, new clipboard
+  content, changed settings, recreation or leaving the page outside authentication.
+- Default-IME identity is checked before each platform operation. Disabling
+  monitoring, changing options, detaching the service and default-IME changes
+  revoke the worker lease. Queued and delayed work cannot retain authorization.
+  Startup establishes a baseline without acting on preexisting content. Duplicate
+  callbacks and empty updates do not cause repeated clears.
+- Android offers no atomic compare-and-clear. Timestamp checks reduce stale
+  requests, but timestamps may collide and a new write between check and clear may
+  also be erased. Callbacks cannot distinguish intentional Copy from an accident.
+  Process death, platform access restrictions and vendor lifecycle policies can
+  delay or prevent callbacks. Cleanup cannot stop access at the instant of writing,
+  recall prior reads or erase other clipboard histories. Random overwriting adds
+  no such protection and is not used. API 26-27 clear with literal empty text.
+- Negative tests cover default-off, cancellation during blocked work, service and
+  default-IME changes, stale tickets, authentication denial, duplicate callbacks,
+  unavailable APIs, disallowed source access and arbitrary writes. Device tests
+  use synthetic metadata or a single fixed public fixture, skipping platform
+  mutation when existing clipboard metadata is present. No real clipboard body
+  is read or included in tests, snapshots or diagnostics. See ADR 0007.
 
 ## Out of scope
 

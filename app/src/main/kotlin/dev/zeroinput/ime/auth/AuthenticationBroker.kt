@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import dev.zeroinput.ime.R
 import dev.zeroinput.security.AuthenticationGrant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -15,7 +16,7 @@ object AuthenticationBroker {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun request(context: Context, callback: (AuthenticationGrant?) -> Unit) {
-        requestCancellable(context, callback)
+        requestCancellable(context, callback = callback)
     }
 
     /**
@@ -25,6 +26,7 @@ object AuthenticationBroker {
      */
     fun requestCancellable(
         context: Context,
+        promptTitle: Int = R.string.unlock_secure_clipboard,
         callback: (AuthenticationGrant?) -> Unit,
     ): RequestHandle {
         val requestId = UUID.randomUUID().toString()
@@ -33,6 +35,7 @@ object AuthenticationBroker {
         mainHandler.postDelayed(timeout, REQUEST_TIMEOUT_MILLIS)
         val intent = Intent(context, SecureClipboardUnlockActivity::class.java)
             .putExtra(SecureClipboardUnlockActivity.EXTRA_REQUEST_ID, requestId)
+            .putExtra(SecureClipboardUnlockActivity.EXTRA_PROMPT_TITLE, promptTitle)
             .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
         if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }

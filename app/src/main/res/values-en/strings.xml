@@ -1,11 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="clipboard_guard_title">System clipboard guard</string>
+    <string name="clipboard_guard_limit">This feature only tries to shorten how long accidentally copied content remains in the system clipboard and helps you clear it. It cannot prevent access at the instant of writing. Disabled by default.\n\nRequires ZeroInput to be selected, its input service running, and system callbacks available. Changes may be missed; accidental copies cannot be identified.</string>
+    <string name="clipboard_guard_listen">Monitor system clipboard changes</string>
+    <string name="clipboard_guard_keyboard">Keyboard reminders</string>
+    <string name="clipboard_guard_notifications">System notifications</string>
+    <string name="clipboard_guard_authenticate">Authenticate before clearing</string>
+    <string name="clipboard_guard_clear_mode">Cleanup mode</string>
+    <string name="clipboard_guard_clear_none">Do not clear</string>
+    <string name="clipboard_guard_clear_confirm">Clear after confirmation</string>
+    <string name="clipboard_guard_clear_automatic">Clear automatically</string>
+    <string name="clipboard_guard_clear_current">Clear current system clipboard</string>
+    <string name="clipboard_guard_permission">Allow system notifications</string>
+    <string name="clipboard_guard_permission_missing">System notifications are not allowed</string>
+    <string name="clipboard_guard_off">Monitoring is off</string>
+    <string name="clipboard_guard_unavailable">Monitoring unavailable. Select ZeroInput and open the keyboard.</string>
+    <string name="clipboard_guard_waiting">Waiting for new clipboard changes</string>
+    <string name="clipboard_guard_changed">System clipboard change detected</string>
+    <string name="clipboard_guard_cleared">System clipboard cleanup performed</string>
+    <string name="clipboard_guard_failed">Clipboard operation incomplete</string>
+    <string name="clipboard_guard_expired">Request expired or clipboard changed. Confirm again.</string>
+    <string name="clipboard_guard_automatic_warning">While monitoring is on, new system clipboard content will be cleared when detected. Ordinary copy and paste may stop working. Earlier copies cannot be recalled, and newly copied content may also be cleared. Content is not saved. This cannot be undone.</string>
+    <string name="clipboard_guard_enable_automatic">Enable automatic cleanup</string>
+    <string name="clipboard_guard_confirmation_warning">Clear the current system clipboard? This cannot be undone. New content may arrive between checking and clearing, so newly copied content could also be cleared. Content is not saved, and earlier copies cannot be recalled.</string>
+    <string name="clipboard_guard_confirm_action">Confirm clear</string>
+    <string name="clipboard_guard_authenticate_action">Authenticate and continue</string>
+    <string name="clipboard_guard_authentication_title">Verify system clipboard cleanup</string>
     <string name="app_name">zero finish input</string>
     <string name="unlock_secure_clipboard">Unlock secure clipboard</string>
     <string name="input_method_name">zero finish input</string>
     <string name="subtype_chinese">Chinese</string>
     <string name="subtype_english">English</string>
     <string name="secure_clipboard">Private clipboard</string>
+    <string name="copy_to_zeroinput">Copy to ZeroInput</string>
+    <plurals name="clipboard_import_received">
+        <item quantity="one">Received %1$d character</item>
+        <item quantity="other">Received %1$d characters</item>
+    </plurals>
+    <string name="clipboard_import_authenticate">Authenticate and view</string>
+    <string name="clipboard_import_confirm">Confirm this content before saving</string>
+    <string name="clipboard_import_saving">Saving</string>
+    <string name="clipboard_import_saved">Saved to private clipboard</string>
+    <string name="clipboard_import_invalid">Cannot receive this content. Select 1 to 8192 characters of plain text.</string>
     <string name="secure_clipboard_disabled">Private clipboard is disabled</string>
     <string name="secure_clipboard_empty">No private snippets</string>
     <string name="secure_clipboard_locked">Private clipboard is locked</string>

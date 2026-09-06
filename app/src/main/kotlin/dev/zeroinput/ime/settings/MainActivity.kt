@@ -13,6 +13,7 @@ import dev.zeroinput.ime.R
 import dev.zeroinput.ime.ZeroInputApplication
 import dev.zeroinput.ime.ZeroInputService
 import dev.zeroinput.ime.auth.AuthenticationBroker
+import dev.zeroinput.ime.clipboardguard.ClipboardGuardSettingsActivity
 import dev.zeroinput.ime.concurrency.BoundedExecutors
 import dev.zeroinput.engine.rime.RimeRuntimeState
 import dev.zeroinput.engine.api.InputLanguage
@@ -96,6 +97,7 @@ class MainActivity : AppCompatActivity() {
         screen.onLearningChanged = { graph.settings.learningEnabled = it; render() }
         screen.onIncognitoChanged = { graph.settings.incognitoMode = it; render() }
         screen.onSecureClipboardChanged = ::setSecureClipboardEnabled
+        screen.onClipboardGuardRequested = { startActivity(Intent(this, ClipboardGuardSettingsActivity::class.java)) }
         screen.onHapticsChanged = { graph.settings.hapticFeedbackEnabled = it; render() }
         screen.onChineseOptionsChanged = { graph.settings.chineseInputOptions = it; render() }
         screen.onChineseEngineChanged = {

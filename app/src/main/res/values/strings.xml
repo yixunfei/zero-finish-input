@@ -1,10 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="clipboard_guard_title">系统剪贴板防护</string>
+    <string name="clipboard_guard_limit">该功能只是尽量缩短误复制内容在系统剪贴板中的停留时间，并帮助用户清理；无法阻止写入瞬间的访问，默认不开启。\n\n仅在选用 ZeroInput 且输入法服务运行、系统允许回调时生效；可能漏报，无法判断是否误复制。</string>
+    <string name="clipboard_guard_listen">监听系统剪贴板变化</string>
+    <string name="clipboard_guard_keyboard">键盘内提醒</string>
+    <string name="clipboard_guard_notifications">系统通知提醒</string>
+    <string name="clipboard_guard_authenticate">清理前验证身份</string>
+    <string name="clipboard_guard_clear_mode">清理方式</string>
+    <string name="clipboard_guard_clear_none">不清理</string>
+    <string name="clipboard_guard_clear_confirm">用户确认后清理</string>
+    <string name="clipboard_guard_clear_automatic">自动清理</string>
+    <string name="clipboard_guard_clear_current">清空当前系统剪贴板</string>
+    <string name="clipboard_guard_permission">允许系统通知</string>
+    <string name="clipboard_guard_permission_missing">系统通知未获允许</string>
+    <string name="clipboard_guard_off">监听未开启</string>
+    <string name="clipboard_guard_unavailable">监听未就绪，请选用 ZeroInput 并打开键盘</string>
+    <string name="clipboard_guard_waiting">正在等待新的剪贴板变化</string>
+    <string name="clipboard_guard_changed">检测到系统剪贴板变化</string>
+    <string name="clipboard_guard_cleared">已执行系统剪贴板清理</string>
+    <string name="clipboard_guard_failed">剪贴板操作未完成</string>
+    <string name="clipboard_guard_expired">请求已失效或剪贴板已变化，请重新确认</string>
+    <string name="clipboard_guard_automatic_warning">监听开启后，将尝试自动清空新检测到的系统剪贴板内容，普通复制和粘贴可能失效。无法撤回已经被读取的内容，也可能清空您刚复制的新内容。此操作不保存正文，无法撤销。</string>
+    <string name="clipboard_guard_enable_automatic">启用自动清理</string>
+    <string name="clipboard_guard_confirmation_warning">将清空当前系统剪贴板，且无法撤销。检查与清空之间仍可能出现新内容，因此也可能清空您刚复制的内容。不会保存正文或从已有副本中撤回内容。</string>
+    <string name="clipboard_guard_confirm_action">确认清空</string>
+    <string name="clipboard_guard_authenticate_action">认证并继续</string>
+    <string name="clipboard_guard_authentication_title">验证系统剪贴板清理操作</string>
     <string name="app_name">zero finish input</string>
     <string name="input_method_name">zero finish input</string>
     <string name="subtype_chinese">中文</string>
     <string name="subtype_english">English</string>
     <string name="secure_clipboard">安全剪贴板</string>
+    <string name="copy_to_zeroinput">复制到 ZeroInput</string>
+    <plurals name="clipboard_import_received">
+        <item quantity="other">收到 %1$d 个字符</item>
+    </plurals>
+    <string name="clipboard_import_authenticate">认证并查看</string>
+    <string name="clipboard_import_confirm">确认保存此内容</string>
+    <string name="clipboard_import_saving">正在保存</string>
+    <string name="clipboard_import_saved">已存入安全剪贴板</string>
+    <string name="clipboard_import_invalid">无法接收此内容。请选择 1 至 8192 个字符的纯文本。</string>
     <string name="unlock_secure_clipboard">解锁安全剪贴板</string>
     <string name="secure_clipboard_disabled">安全剪贴板未启用</string>
     <string name="secure_clipboard_empty">暂无安全片段</string>

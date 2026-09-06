@@ -26,6 +26,7 @@ import dev.zeroinput.ime.core.InputSessionController
 import dev.zeroinput.ime.input.AndroidEditorConnection
 import dev.zeroinput.ime.settings.MainActivity
 import dev.zeroinput.ime.settings.SecureClipboardManagerActivity
+import dev.zeroinput.ime.clipboardguard.ClipboardGuardSettingsActivity
 import dev.zeroinput.ime.ui.KeyboardAction
 import dev.zeroinput.ime.ui.SecureClipboardItemUi
 import dev.zeroinput.ime.ui.ZeroInputView
@@ -36,6 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 class ZeroInputService : InputMethodService() {
+    private var clipboardGuardObserver: AutoCloseable? = null
     private val graph: AppGraph
         get() = (application as ZeroInputApplication).graph
 
@@ -107,6 +109,10 @@ class ZeroInputService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        graph.clipboardGuard.attachIme()
+        clipboardGuardObserver = graph.clipboardGuard.observe { state ->
+            inputView?.renderClipboardGuard(state.options.listening && state.options.keyboardReminder, state.ticket != null)
+        }
         engineWarmupDelivery = EngineWarmupResultDelivery(
             post = { runnable -> mainHandler.post(runnable) },
             deliver = ::handleEngineWarmupResult,
@@ -289,6 +295,9 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        clipboardGuardObserver?.close()
+        clipboardGuardObserver = null
+        graph.clipboardGuard.detachIme()
         endInputSession(reset = false)
         languagePackObserver?.close()
         languagePackObserver = null
@@ -370,6 +379,12 @@ class ZeroInputService : InputMethodService() {
     }
 
     private fun bindView(view: ZeroInputView) {
+        val guard = graph.clipboardGuard.state
+        view.renderClipboardGuard(guard.options.listening && guard.options.keyboardReminder, guard.ticket != null)
+        view.onClipboardGuardRequested = {
+            registerInteraction()
+            launchActivity(ClipboardGuardSettingsActivity::class.java)
+        }
         view.onUserInteraction = ::registerInteraction
         view.onKeyboardAction = ::handleKeyboardAction
         view.onClearCompositionRequested = {

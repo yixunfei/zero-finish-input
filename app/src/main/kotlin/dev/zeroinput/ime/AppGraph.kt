@@ -1,6 +1,8 @@
 package dev.zeroinput.ime
 
 import android.content.Context
+import dev.zeroinput.ime.clipboardguard.ClipboardGuardPreferences
+import dev.zeroinput.ime.clipboardguard.ClipboardGuardRuntime
 import dev.zeroinput.engine.api.InputEngine
 import dev.zeroinput.engine.api.EngineDescriptor
 import dev.zeroinput.engine.api.InputLanguage
@@ -37,6 +39,8 @@ class AppGraph(context: Context) : AutoCloseable {
     )
 
     val settings = SettingsRepository(applicationContext)
+    internal val clipboardGuardPreferences = ClipboardGuardPreferences(applicationContext)
+    internal val clipboardGuard = ClipboardGuardRuntime(applicationContext, clipboardGuardPreferences)
     val userLexicon = UserLexiconRepository(applicationContext)
     private val queuedPersonalization = QueuedPersonalizationStore(
         delegate = userLexicon,
@@ -200,6 +204,7 @@ class AppGraph(context: Context) : AutoCloseable {
         listOf(rime.descriptor, dictionaryEngine.descriptor, english.descriptor) + languagePackRegistry.descriptors()
 
     override fun close() {
+        clipboardGuard.close()
         engineExecutor.shutdownNow()
         queuedPersonalization.close()
         languagePackSnapshot = emptyList()

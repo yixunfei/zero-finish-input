@@ -53,6 +53,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
     var onDictionaryRequested: () -> Unit = {}
     var onPersonalDataClearRequested: () -> Unit = {}
     var onSecureClipboardRequested: () -> Unit = {}
+    var onClipboardGuardRequested: () -> Unit = {}
     var onLanguagePackRequested: () -> Unit = {}
     var onLanguagePackEnabledChanged: (String, Boolean) -> Unit = { _, _ -> }
     var onLanguagePackSelected: (String) -> Unit = {}
@@ -157,6 +158,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
         content.addView(learningSwitch)
         content.addView(incognitoSwitch)
         content.addView(secureClipboardSwitch)
+        command(context.getString(R.string.clipboard_guard_title)) { onClipboardGuardRequested() }
 
         section(context.getString(R.string.section_data))
         command(context.getString(R.string.setting_user_phrases)) { onDictionaryRequested() }

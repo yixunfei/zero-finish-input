@@ -46,10 +46,11 @@ ZeroInput 是一个面向 Android 的开源输入法，应用 ID 为 `dev.zeroin
 
 ### 3.2 系统剪贴板隔离
 
-- IME 服务及其他业务代码不得获取、监听、读取或写入 Android 系统剪贴板。
-- 禁止使用 `ClipboardManager`、`CLIPBOARD_SERVICE`、`getPrimaryClip`、`setPrimaryClip` 及等价反射或间接封装。
+- 系统剪贴板误复制防护默认关闭，只有用户手动开启监听后，专用 `app/clipboardguard/AndroidSystemClipboard` 适配器才可注册变化监听、读取时间戳及空状态元信息，按用户独立配置提醒或清理。普通业务代码仍不得访问系统剪贴板。
+- 系统剪贴板正文读取始终禁止。`ClipboardManager`、监听与清理 API 仅允许上述适配器及指定的构造数据平台测试使用；Android 8.x 的清理只允许写入字面量空文本。禁止随机覆写、正文缓存、自动收录、来源追踪、反射或间接绕过检查。
+- 监听、键盘提醒、系统通知、清理方式和清理前身份认证必须分别配置。自动清理与身份认证互斥；关闭监听、设置变化、默认输入法变化或 IME 销毁使旧请求失效。此功能只是尽量缩短误复制内容在系统剪贴板中的停留时间，并帮助用户清理；无法阻止写入瞬间的访问。
 - 安全剪贴板是 ZeroInput 私有加密内容库，不与系统剪贴板同步，不后台采集内容，不导出 `ContentProvider`、Service 或其他跨应用读取通道。
-- 内容只能由用户在 ZeroInput 管理页主动添加，并在输入法面板中主动选择后提交。
+- 内容可由用户在管理页主动添加，或通过选中文字的“复制到 ZeroInput”及文本分享入口主动导入；导入必须在 ZeroInput 内认证并确认保存。外部入口只能接收待确认内容，不得查询或返回私有库条目、标签、正文或认证状态。
 
 ### 3.3 备份、导出与日志
 
@@ -147,8 +148,8 @@ language-pack -> security
 ## 7. Android 组件与界面规范
 
 - 所有新增 Activity、Service、Receiver、Provider 默认 `android:exported="false"`。
-- 仅启动 Activity 和受 `android.permission.BIND_INPUT_METHOD` 保护的 IME Service 可作为当前系统入口。新增导出组件必须先更新威胁模型并获得明确确认。
-- 不申请存储、通知、位置、联系人等与离线输入无关的权限。新增任何权限都必须说明必要性并同步更新 `privacyCheck` 白名单；白名单不得为了让构建通过而放宽。
+- 已批准的系统入口为启动 Activity、受 `android.permission.BIND_INPUT_METHOD` 保护的 IME Service，以及仅接收 `ACTION_PROCESS_TEXT` / `ACTION_SEND` 纯文本的剪贴板导入 Activity。其他新增导出组件必须先更新威胁模型并获得明确确认。
+- 不申请存储、位置、联系人等与离线输入无关的权限。已批准的 `POST_NOTIFICATIONS` 仅用于用户主动开启的系统剪贴板变化提醒，运行时按需申请且通知不得含正文、标签或来源。其他新增权限须说明必要性并同步更新 `privacyCheck` 白名单；白名单不得为了让构建通过而放宽。
 - 使用现有 Android Views、ViewBinding、Material 与资源体系。可见字符串放入资源，不硬编码；触控目标、无障碍描述、横竖屏、深浅主题和小屏布局均需可用。
 - 输入面板优先保证稳定尺寸与快速操作。动态内容不得导致键盘、候选条或工具按钮无意义跳动、重叠或溢出。
 - 二元设置使用开关/复选框，模式使用分段或单选控件，熟悉操作优先使用已有图标并提供内容描述。避免装饰性卡片、嵌套卡片和与输入效率无关的动画。

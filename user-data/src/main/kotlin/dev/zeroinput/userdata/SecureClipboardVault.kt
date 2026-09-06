@@ -3,24 +3,26 @@ package dev.zeroinput.userdata
 import android.content.Context
 import dev.zeroinput.security.AuthenticationGrant
 import dev.zeroinput.security.EncryptedFileStore
+import dev.zeroinput.security.EncryptedStore
 import dev.zeroinput.security.SecurityAliases
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicLong
 
-class SecureClipboardVault(context: Context) {
-    private val store = EncryptedFileStore(
-        context = context,
-        fileName = "secure-clipboard.bin",
-        keyAlias = SecurityAliases.SECURE_CLIPBOARD,
+class SecureClipboardVault(
+    private val store: EncryptedStore,
+    private val indexStore: EncryptedStore,
+) {
+    constructor(context: Context) : this(
+        EncryptedFileStore(context, "secure-clipboard.bin", SecurityAliases.SECURE_CLIPBOARD),
+        EncryptedFileStore(context, "secure-clipboard-index.bin", SecurityAliases.SECURE_CLIPBOARD_INDEX),
     )
-    private val indexStore = EncryptedFileStore(
-        context = context,
-        fileName = "secure-clipboard-index.bin",
-        keyAlias = SecurityAliases.SECURE_CLIPBOARD_INDEX,
-    )
+
     private val lock = Any()
+    private val generation = AtomicLong()
     /** Index entries contain no labels or正文 and are safe to cache in-process. */
     private var indexCache: List<StoredSummary>? = null
 
@@ -52,7 +54,17 @@ class SecureClipboardVault(context: Context) {
         entries.map { it.toMetadata() }
     }
 
-    fun add(label: String, value: String, grant: AuthenticationGrant): SecureClipboardMetadata = synchronized(lock) {
+    /** Capture before queuing an addition; deletion invalidates older requests. */
+    fun captureGeneration(): Long = generation.get()
+
+    fun add(
+        label: String,
+        value: String,
+        grant: AuthenticationGrant,
+        expectedGeneration: Long = captureGeneration(),
+        isActive: () -> Boolean = { true },
+    ): SecureClipboardMetadata = synchronized(lock) {
+        checkWriteActive(expectedGeneration, isActive)
         require(grant.consume()) { "Authentication expired or was already used" }
         val cleanValue = validateValue(value)
         val entries = load().toMutableList()
@@ -64,7 +76,8 @@ class SecureClipboardVault(context: Context) {
             updatedAtEpochMillis = System.currentTimeMillis(),
         )
         entries += entry
-        persist(entries)
+        checkWriteActive(expectedGeneration, isActive)
+        persist(entries) { checkWriteActive(expectedGeneration, isActive) }
         persistIndex(entries)
         entry.toMetadata()
     }
@@ -74,17 +87,27 @@ class SecureClipboardVault(context: Context) {
         val entries = load().toMutableList()
         val removed = entries.removeAll { it.id == id }
         if (removed) {
+            generation.incrementAndGet()
             persist(entries)
             persistIndex(entries)
         }
         removed
     }
 
-    fun clear(grant: AuthenticationGrant) = synchronized(lock) {
+    fun clear(grant: AuthenticationGrant) {
         require(grant.consume()) { "Authentication expired or was already used" }
-        store.delete(deleteKey = true)
-        indexStore.delete(deleteKey = true)
-        indexCache = emptyList()
+        generation.incrementAndGet()
+        synchronized(lock) {
+            store.delete(deleteKey = true)
+            indexStore.delete(deleteKey = true)
+            indexCache = emptyList()
+        }
+    }
+
+    private fun checkWriteActive(expectedGeneration: Long, isActive: () -> Boolean) {
+        if (generation.get() != expectedGeneration || !isActive() || Thread.currentThread().isInterrupted) {
+            throw CancellationException("Clipboard write cancelled")
+        }
     }
 
     private fun load(): List<SecureClipboardEntry> {
@@ -138,7 +161,7 @@ class SecureClipboardVault(context: Context) {
         }
     }
 
-    private fun persist(entries: List<SecureClipboardEntry>) {
+    private fun persist(entries: List<SecureClipboardEntry>, beforeWrite: () -> Unit = {}) {
         val root = JSONObject().apply {
             put("format", FORMAT_VERSION)
             put("entries", JSONArray().apply {
@@ -152,7 +175,13 @@ class SecureClipboardVault(context: Context) {
                 }
             })
         }
-        store.write(root.toString().toByteArray(StandardCharsets.UTF_8))
+        val bytes = root.toString().toByteArray(StandardCharsets.UTF_8)
+        try {
+            beforeWrite()
+            store.write(bytes)
+        } finally {
+            bytes.fill(0)
+        }
     }
 
     private fun persistIndex(entries: List<SecureClipboardEntry>) {
@@ -170,7 +199,12 @@ class SecureClipboardVault(context: Context) {
                 }
             })
         }
-        indexStore.write(root.toString().toByteArray(StandardCharsets.UTF_8))
+        val bytes = root.toString().toByteArray(StandardCharsets.UTF_8)
+        try {
+            indexStore.write(bytes)
+        } finally {
+            bytes.fill(0)
+        }
         indexCache = summaries
     }
 
@@ -192,13 +226,13 @@ class SecureClipboardVault(context: Context) {
         updatedAtEpochMillis = updatedAtEpochMillis,
     )
 
-    private companion object {
-        const val FORMAT_VERSION = 1
-        const val INDEX_FORMAT_VERSION = 1
-        const val MAX_ENTRIES = 100
+    companion object {
         const val MAX_LABEL_LENGTH = 64
         const val MAX_VALUE_LENGTH = 8_192
-        val ID_PATTERN = Regex(
+        private const val FORMAT_VERSION = 1
+        private const val INDEX_FORMAT_VERSION = 1
+        private const val MAX_ENTRIES = 100
+        private val ID_PATTERN = Regex(
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
         )
     }
