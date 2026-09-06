@@ -1,0 +1,273 @@
+package dev.zeroinput.ime
+
+import android.content.res.Configuration
+import android.graphics.Rect
+import android.view.ContextThemeWrapper
+import android.view.View
+import android.view.ViewGroup
+import android.view.MotionEvent
+import android.os.SystemClock
+import android.widget.TextView
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.zeroinput.engine.api.Candidate
+import dev.zeroinput.engine.api.EngineSnapshot
+import dev.zeroinput.ime.core.InputSessionState
+import dev.zeroinput.ime.ui.CandidateStripView
+import dev.zeroinput.ime.ui.EmojiPanelView
+import dev.zeroinput.ime.ui.KeyboardPanel
+import dev.zeroinput.ime.ui.SecureClipboardPanelView
+import dev.zeroinput.ime.ui.ZeroInputView
+import dev.zeroinput.ime.ui.KeyboardAction
+import dev.zeroinput.ime.ui.InputEngineStatus
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class InputPanelTest {
+    @Test
+    fun compositionAndLoadingStatusDoNotTakeWidthFromCandidates() = onMain {
+        val panel = panel(false)
+        panel.renderEngineStatus(InputEngineStatus.PREPARING)
+        panel.renderSession(candidateState())
+        measure(panel, 320)
+        val candidateViews = visible(panel).filterIsInstance<TextView>().filter {
+            it.contentDescription?.toString()?.startsWith(panel.context.getString(dev.zeroinput.ime.ui.R.string.candidate_description, "")) == true
+        }
+        val strip = visible(panel).filterIsInstance<CandidateStripView>().single()
+        val fullyVisible = candidateViews.count {
+            val rect = Rect(0, 0, it.width, it.height)
+            strip.offsetDescendantRectToMyCoords(it, rect)
+            rect.left >= 0 && rect.right <= strip.width - dp(panel, 48)
+        }
+        assertTrue("A 320dp keyboard must show at least four short candidates", fullyVisible >= 4)
+    }
+
+    @Test
+    fun expandedCandidatesKeepHeightAndRoutePagingAndSelection() = onMain {
+        val panel = panel(false)
+        panel.renderSession(candidateState())
+        var pageRequests = 0
+        var selection = -1
+        panel.onCandidatePageChanged = { pageRequests++ }
+        panel.onCandidateSelected = { selection = it }
+        measure(panel, 320)
+        val height = panel.height
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expand_candidates)).performClick()
+        measure(panel, 320)
+        assertTrue("Expanding candidates must preserve keyboard height", panel.height == height)
+        assertFalse(visible(panel).any { it is KeyboardPanel })
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.next_candidates)).performClick()
+        assertTrue(pageRequests == 1)
+        visible(panel).last { it.contentDescription == panel.context.getString(dev.zeroinput.ime.ui.R.string.candidate_description, "你好") }.performClick()
+        assertTrue(selection >= 0)
+        panel.renderSession(InputSessionState())
+        assertTrue(visible(panel).any { it is KeyboardPanel })
+        assertFalse(visible(panel).any { it.contentDescription == panel.context.getString(dev.zeroinput.ime.ui.R.string.candidate_description, "你好") })
+    }
+
+    @Test
+    fun candidateChangedDuringTouchIsNotSelected() = onMain {
+        val panel = panel(false)
+        panel.renderSession(candidateState())
+        measure(panel, 320)
+        var selected = false
+        panel.onCandidateSelected = { selected = true }
+        val target = button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.candidate_description, "你好"))
+        touch(target, MotionEvent.ACTION_DOWN)
+        panel.renderSession(InputSessionState(snapshot = EngineSnapshot("hao", "hao", listOf(Candidate("changed", "好")))))
+        target.performClick()
+        assertFalse("A late click must not select a replacement candidate", selected)
+        touch(target, MotionEvent.ACTION_CANCEL)
+    }
+
+    @Test
+    fun holdingBackspaceRepeatsUntilTheGestureIsCancelled() {
+        lateinit var panel: ZeroInputView
+        val repeated = CountDownLatch(2)
+        var deletes = 0
+        onMain {
+            panel = panel(false)
+            measure(panel, 320)
+            panel.onKeyboardAction = { if (it == KeyboardAction.Backspace) { deletes++; repeated.countDown() } }
+            touch(button(panel, "退格"), MotionEvent.ACTION_DOWN)
+        }
+        assertTrue("Holding backspace must repeat", repeated.await(2, TimeUnit.SECONDS))
+        var countAtCancellation = 0
+        onMain { panel.cancelPendingGestures(); countAtCancellation = deletes }
+        Thread.sleep(180)
+        onMain { assertTrue("Cancellation must remove pending deletes", deletes == countAtCancellation) }
+    }
+
+    @Test
+    fun longBackspaceClearsCompositionWithoutContinuingIntoEditorText() {
+        lateinit var panel: ZeroInputView
+        val cleared = CountDownLatch(1)
+        var deletes = 0
+        onMain {
+            panel = panel(false)
+            measure(panel, 320)
+            panel.onClearCompositionRequested = { cleared.countDown(); true }
+            panel.onKeyboardAction = { if (it == KeyboardAction.Backspace) deletes++ }
+            touch(button(panel, "退格"), MotionEvent.ACTION_DOWN)
+        }
+        assertTrue("Long press must request composition clearing", cleared.await(2, TimeUnit.SECONDS))
+        Thread.sleep(180)
+        onMain {
+            panel.cancelPendingGestures()
+            assertTrue("The same hold must not delete committed text", deletes == 0)
+        }
+    }
+
+    private fun candidateState() = InputSessionState(snapshot = EngineSnapshot(
+        "nihaozhongguoshijie", "ni hao zhong guo shi jie",
+        List(8) { Candidate("fixture:$it", if (it % 2 == 0) "你好" else "你") },
+        hasNextPage = true,
+    ))
+
+    private fun touch(view: View, action: Int) {
+        val time = SystemClock.uptimeMillis()
+        MotionEvent.obtain(time, time, action, 5f, 5f, 0).also {
+            view.dispatchTouchEvent(it)
+            it.recycle()
+        }
+    }
+
+    private fun dp(view: View, value: Int): Int = (value * view.resources.displayMetrics.density).toInt()
+
+    @Test
+    fun landscapeEmojiSearchKeepsEveryKeyboardRowAndPanelControlInsideWindow() = onMain {
+        val panel = panel(false, landscape = true)
+        button(panel, "emoji").performClick()
+        button(panel, "搜索 emoji").performClick()
+        measure(panel, 800, 360)
+        val keyboard = visible(panel).filterIsInstance<KeyboardPanel>().single()
+        val emoji = visible(panel).filterIsInstance<EmojiPanelView>().single()
+        for (view in visible(keyboard) + listOf(emoji, button(panel, "返回键盘"))) {
+            val bounds = Rect(0, 0, view.width, view.height)
+            panel.offsetDescendantRectToMyCoords(view, bounds)
+            assertTrue("Keyboard rows and return control must fit the input window", bounds.top >= 0 && bounds.bottom <= panel.height)
+        }
+        assertLabelsFit(panel)
+    }
+
+    @Test
+    fun systemBarsAndDisplayCutoutStayOutsidePanelControls() = onMain {
+        val panel = panel(false)
+        val insets = WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, 24))
+            .setInsets(WindowInsetsCompat.Type.captionBar(), Insets.of(0, 0, 0, 48))
+            .setInsets(WindowInsetsCompat.Type.displayCutout(), Insets.of(20, 0, 12, 0))
+            .build()
+        repeat(2) { ViewCompat.dispatchApplyWindowInsets(panel, insets) }
+        measure(panel, 320)
+        assertTrue("Repeated inset delivery must reserve the system control area once", panel.paddingBottom == 48)
+        assertTrue("Side cutouts must stay outside the keys", panel.paddingLeft == 20 && panel.paddingRight == 12)
+        val lastRow = visible(panel).filterIsInstance<KeyboardPanel>().single()
+        assertTrue("Keyboard must end above the system controls", lastRow.bottom <= panel.height - 48)
+        ViewCompat.dispatchApplyWindowInsets(panel, WindowInsetsCompat.Builder().build())
+        assertTrue("Changed geometry must remove obsolete padding", panel.paddingBottom == 0 && panel.paddingLeft == 0)
+    }
+
+    @Test
+    fun operationLabelsFitInLightAndDarkThemes() = onMain {
+        for (night in listOf(false, true)) {
+            for (width in listOf(320, 411, 800)) {
+                val panel = panel(night)
+                measure(panel, width)
+                assertLabelsFit(panel)
+                panel.renderSession(InputSessionState(snapshot = EngineSnapshot(
+                    rawInput = "ni",
+                    composition = "ni",
+                    candidates = listOf(Candidate("fixture", "你")),
+                    hasNextPage = true,
+                    hasPreviousPage = true,
+                )))
+                measure(panel, width)
+                assertLabelsFit(panel)
+            }
+        }
+    }
+
+    @Test
+    fun clipboardAndEmojiKeepReturnAndSearchControlsUsable() = onMain {
+        val panel = panel(false)
+        var interactions = 0
+        panel.onUserInteraction = { interactions++ }
+        measure(panel, 320)
+        button(panel, "安全剪贴板").performClick()
+        panel.renderSecureClipboard(false, emptyList())
+        measure(panel, 320)
+        assertLabelsFit(panel)
+        assertTrue(visible(panel).any { it is SecureClipboardPanelView })
+        assertFalse(visible(panel).any { it is KeyboardPanel || it is CandidateStripView })
+        button(panel, "返回键盘").performClick()
+        assertTrue(visible(panel).any { it is KeyboardPanel })
+        assertFalse(visible(panel).any { it is SecureClipboardPanelView })
+        button(panel, "emoji").performClick()
+        measure(panel, 320)
+        assertLabelsFit(panel)
+        button(panel, "搜索 emoji").performClick()
+        measure(panel, 320)
+        val searchHeight = panel.measuredHeight
+        button(panel, "返回键盘").performClick()
+        button(panel, "emoji").performClick()
+        measure(panel, 320)
+        assertTrue("Returning to active emoji search must preserve its height", panel.measuredHeight == searchHeight)
+        assertTrue("Panel changes must invalidate pending authenticated actions", interactions >= 5)
+    }
+
+    private fun panel(night: Boolean, landscape: Boolean = false): ZeroInputView {
+        val target = InstrumentationRegistry.getInstrumentation().targetContext
+        val configuration = Configuration(target.resources.configuration).apply {
+            orientation = if (landscape) Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT
+            screenWidthDp = if (landscape) 800 else 411
+            screenHeightDp = if (landscape) 411 else 914
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                if (night) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+        }
+        val themed = ContextThemeWrapper(target.createConfigurationContext(configuration), R.style.Theme_ZeroInput_InputMethod)
+        return ZeroInputView(themed)
+    }
+
+    private fun measure(view: View, widthDp: Int, heightDp: Int = 1000) {
+        val density = view.resources.displayMetrics.density
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec((widthDp * density).toInt(), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec((heightDp * density).toInt(), View.MeasureSpec.AT_MOST),
+        )
+        view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+    }
+
+    private fun assertLabelsFit(root: View) {
+        visible(root).filterIsInstance<TextView>().filter { it.isClickable && it.text.isNotEmpty() }.forEach { button ->
+            val available = button.width - button.compoundPaddingLeft - button.compoundPaddingRight
+            assertTrue("Button padding must leave space for its label", available >= button.paint.measureText(button.text.toString()))
+            val layout = button.layout
+            assertTrue("Button label must have a text layout", layout != null && layout.lineCount > 0)
+            assertTrue("Button label must not be ellipsized", layout.getEllipsisCount(0) == 0)
+        }
+    }
+
+    private fun button(root: View, description: String): View =
+        visible(root).first { it.contentDescription?.toString() == description }
+
+    private fun visible(root: View): List<View> {
+        if (root.visibility != View.VISIBLE) return emptyList()
+        val children = if (root is ViewGroup) (0 until root.childCount).flatMap { visible(root.getChildAt(it)) } else emptyList()
+        return listOf(root) + children
+    }
+
+    private fun onMain(action: () -> Unit) {
+        var result: Result<Unit>? = null
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { result = runCatching(action) }
+        checkNotNull(result).getOrThrow()
+    }
+}

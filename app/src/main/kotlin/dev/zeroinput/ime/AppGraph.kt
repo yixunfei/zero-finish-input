@@ -1,0 +1,211 @@
+package dev.zeroinput.ime
+
+import android.content.Context
+import dev.zeroinput.engine.api.InputEngine
+import dev.zeroinput.engine.api.EngineDescriptor
+import dev.zeroinput.engine.api.InputLanguage
+import dev.zeroinput.engine.api.LearnedSuggestionSource
+import dev.zeroinput.engine.api.WeightedTerm
+import dev.zeroinput.engine.english.EnglishEngineFactory
+import dev.zeroinput.engine.rime.RimeEngineFactory
+import dev.zeroinput.engine.dictionary.DictionaryEngineFactory
+import dev.zeroinput.ime.settings.ChineseEngineChoice
+import dev.zeroinput.ime.personalization.QueuedPersonalizationStore
+import dev.zeroinput.ime.settings.SettingsRepository
+import dev.zeroinput.ime.concurrency.BoundedExecutors
+import dev.zeroinput.languagepack.LanguagePackInstaller
+import dev.zeroinput.languagepack.LanguagePackRegistry
+import dev.zeroinput.languagepack.InstalledLanguagePack
+import dev.zeroinput.userdata.EmojiHistoryRepository
+import dev.zeroinput.userdata.SecureClipboardVault
+import dev.zeroinput.userdata.UserLexiconRepository
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ExecutorService
+
+class AppGraph(context: Context) : AutoCloseable {
+    private val applicationContext = context.applicationContext
+    /**
+     * Shared engine worker.  Rime initialization, language-pack discovery and
+     * prepared engine creation are serialized to avoid competing for storage
+     * and to keep librime's process-wide runtime transitions ordered.  The
+     * queue is deliberately bounded because session changes can arrive in a
+     * burst while this worker is still warming up.
+     */
+    internal val engineExecutor: ExecutorService = BoundedExecutors.singleThread(
+        name = "zeroinput-engine-worker",
+        queueCapacity = 2,
+    )
+
+    val settings = SettingsRepository(applicationContext)
+    val userLexicon = UserLexiconRepository(applicationContext)
+    private val queuedPersonalization = QueuedPersonalizationStore(
+        delegate = userLexicon,
+        preload = userLexicon::warmUp,
+    )
+    val personalization: dev.zeroinput.engine.api.PersonalizationStore = queuedPersonalization
+    val emojiHistory = EmojiHistoryRepository(applicationContext)
+    val secureClipboard = SecureClipboardVault(applicationContext)
+    val languagePacks = LanguagePackInstaller(applicationContext)
+    val languagePackRegistry = LanguagePackRegistry(languagePacks)
+    val rime = RimeEngineFactory(applicationContext)
+    private val dictionaryEngine = DictionaryEngineFactory()
+
+    fun chineseEngineDescriptor(choice: ChineseEngineChoice): EngineDescriptor = when (choice) {
+        ChineseEngineChoice.RIME -> rime.descriptor
+        ChineseEngineChoice.DICTIONARY_TEST -> dictionaryEngine.descriptor
+    }
+    private val english = EnglishEngineFactory(
+        learnedSuggestions = LearnedSuggestionSource { prefix, limit ->
+            // Keep English personalization behind the same queued, encrypted
+            // store used by the controller.  This avoids a synchronous
+            // Keystore read on the IME thread and preserves privacy gating in
+            // EnglishInputEngine.start().
+            queuedPersonalization.suggestionsFor(prefix, InputLanguage.ENGLISH, limit)
+                .map { suggestion -> WeightedTerm(suggestion.text, suggestion.frequency) }
+        },
+    )
+    @Volatile
+    private var languagePackSnapshot: List<InstalledLanguagePack> = emptyList()
+    @Volatile
+    private var languagePackDiscoveryComplete = false
+    private val languagePackRefreshLock = Any()
+    private val languagePackListeners = CopyOnWriteArrayList<() -> Unit>()
+    private val personalizationListeners = CopyOnWriteArrayList<() -> Unit>()
+
+    init {
+        // Bring the core engine online before hashing optional packs.  Both
+        // operations stay on one background queue so they do not compete for
+        // storage bandwidth during the first input session.
+        engineExecutor.execute {
+            // A broken optional language pack must not prevent the core Rime
+            // runtime from publishing its terminal READY/FAILED state.
+            runCatching { rime.warmUp() }
+            runCatching { refreshLanguagePacks() }
+        }
+    }
+
+    fun createEngine(language: InputLanguage): InputEngine = when (language) {
+        InputLanguage.CHINESE -> rime.create()
+        InputLanguage.ENGLISH -> english.create()
+    }
+
+    /**
+     * Returns a predictable, in-memory engine for the first input frame.  It
+     * must stay cheap: callers invoke it from the IME lifecycle thread while
+     * the native/data-backed replacement is prepared in the worker below.
+     */
+    fun createImmediateEngine(language: InputLanguage): InputEngine = when (language) {
+        InputLanguage.CHINESE -> rime.createFallback()
+        InputLanguage.ENGLISH -> english.create()
+    }
+
+    /**
+     * Creates the engine requested by a warm-up ticket.  A null result means
+     * that the runtime or language-pack registry is not ready yet; the caller
+     * keeps the immediate fallback and retries on the corresponding state
+     * callback.
+     */
+    internal fun prepareEngine(request: EngineWarmupRequest): InputEngine? {
+        if (!request.privacy.suggestionsAllowed) return null
+        if (request.retryInitialization && request.language == InputLanguage.CHINESE &&
+            request.languagePackKey == null && request.chineseEngine == ChineseEngineChoice.RIME && !rime.runtime.isReady) rime.warmUp()
+        val candidate = if (request.languagePackKey != null) {
+            createLanguagePackEngine(request.languagePackKey)
+        } else {
+            when (request.language) {
+                InputLanguage.CHINESE -> when (request.chineseEngine) {
+                    ChineseEngineChoice.RIME -> rime.createNativeOrNull(request.chineseOptions)
+                    ChineseEngineChoice.DICTIONARY_TEST -> dictionaryEngine.create(request.chineseOptions)
+                }
+                InputLanguage.ENGLISH -> english.create()
+            }
+        }
+        if (candidate == null) return null
+        val supportsLanguage = runCatching {
+            request.language in candidate.descriptor.languages
+        }.getOrDefault(false)
+        if (!supportsLanguage) runCatching { candidate.close() }
+        return candidate.takeIf { supportsLanguage }
+    }
+
+    fun createLanguagePackEngine(packKey: String): InputEngine? = languagePackRegistry.create(packKey)
+
+    fun refreshLanguagePacks() {
+        val listeners = synchronized(languagePackRefreshLock) {
+            // Keep discovery failures isolated from the core engine.  The
+            // previous verified registry remains usable when a filesystem scan
+            // is interrupted, while listeners still receive a terminal
+            // notification so the UI/IME can retry or fall back deterministically.
+            val registryResult = runCatching { languagePackRegistry.refresh() }
+            languagePackSnapshot = runCatching { languagePacks.installedSnapshot() }
+                .getOrDefault(languagePackSnapshot)
+            if (registryResult.isSuccess) {
+                // The scan has now reached a terminal state.  A key can only
+                // be preserved while this first asynchronous scan is still in
+                // flight; once it completes, clear a genuinely missing or
+                // disabled package so the next session uses the base engine.
+                languagePackDiscoveryComplete = true
+                if (!languagePackRegistry.contains(settings.lastLanguagePackKey)) {
+                    settings.lastLanguagePackKey = null
+                }
+            }
+            languagePackListeners.toList()
+        }
+        listeners.forEach { listener -> runCatching(listener) }
+    }
+
+    fun isLanguagePackDiscoveryComplete(): Boolean = languagePackDiscoveryComplete
+
+    /** Returns the last verified package snapshot without touching disk. */
+    fun installedLanguagePacks(): List<InstalledLanguagePack> = languagePackSnapshot
+
+    fun addLanguagePackListener(listener: () -> Unit): AutoCloseable {
+        languagePackListeners += listener
+        runCatching(listener)
+        return object : AutoCloseable {
+            override fun close() {
+                languagePackListeners -= listener
+            }
+        }
+    }
+
+    /** Clears user phrases, frequencies, and emoji recency through their queued stores. */
+    fun clearPersonalizationData() {
+        // Settings invokes this on its worker.  Wait for the encrypted phrase
+        // deletion so a process death immediately after the confirmation
+        // cannot resurrect the old dictionary on the next launch.
+        queuedPersonalization.clearAndAwait()
+        emojiHistory.clear()
+        personalizationListeners.forEach { listener -> runCatching(listener) }
+    }
+
+    fun addPersonalizationListener(listener: () -> Unit): AutoCloseable {
+        personalizationListeners += listener
+        return object : AutoCloseable {
+            override fun close() {
+                personalizationListeners -= listener
+            }
+        }
+    }
+
+    /**
+     * Observes completion of a non-blocking personal-suggestion lookup.
+     * Callbacks run on the personalization worker and must only post work to
+     * the IME owner thread.
+     */
+    fun addPersonalizationSuggestionListener(listener: () -> Unit): AutoCloseable =
+        queuedPersonalization.addSuggestionListener(listener)
+
+    fun registeredEngineDescriptors(): List<EngineDescriptor> =
+        listOf(rime.descriptor, dictionaryEngine.descriptor, english.descriptor) + languagePackRegistry.descriptors()
+
+    override fun close() {
+        engineExecutor.shutdownNow()
+        queuedPersonalization.close()
+        languagePackSnapshot = emptyList()
+        languagePackListeners.clear()
+        personalizationListeners.clear()
+        languagePackRegistry.close()
+        rime.close()
+    }
+}

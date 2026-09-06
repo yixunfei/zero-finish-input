@@ -1,0 +1,15 @@
+* text=auto
+gradlew text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=lf
+*.sh text eol=lf
+*.kt text eol=lf
+*.kts text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.xml text eol=lf
+*.md text eol=lf
+
+# Preserve exact upstream bytes used by the bootstrap SHA-256 checks.
+engine-rime/src/main/assets/rime/luna_pinyin.dict.yaml -text
+engine-rime/src/main/assets/rime/essay.txt -text

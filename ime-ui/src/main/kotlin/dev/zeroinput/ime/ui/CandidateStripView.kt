@@ -1,0 +1,113 @@
+package dev.zeroinput.ime.ui
+
+import android.content.Context
+import android.text.TextUtils
+import android.util.AttributeSet
+import android.view.Gravity
+import android.view.View
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
+import dev.zeroinput.engine.api.EngineSnapshot
+
+class CandidateStripView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : LinearLayout(context, attrs) {
+    var onCandidateSelected: (Int) -> Unit = {}
+    var onExpandRequested: () -> Unit = {}
+    var onRetryRequested: () -> Unit = {}
+    private val composition = TextView(context).apply {
+        textSize = 14f
+        gravity = Gravity.CENTER_VERTICAL
+        setSingleLine()
+        ellipsize = TextUtils.TruncateAt.MIDDLE
+        setPadding(dp(8), 0, dp(8), 0)
+    }
+    private val status = TextView(context).apply {
+        textSize = 12f
+        gravity = Gravity.CENTER_VERTICAL
+        setSingleLine()
+        ellipsize = TextUtils.TruncateAt.END
+    }
+    private val progress = ProgressBar(context, null, android.R.attr.progressBarStyleSmall)
+    private val candidates = LinearLayout(context).apply { orientation = HORIZONTAL }
+    private val scroll = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_NEVER
+        addView(candidates)
+    }
+    private val expand = panelIconButton(context, android.R.drawable.arrow_down_float, R.string.expand_candidates) { onExpandRequested() }
+    private val retry = panelIconButton(context, android.R.drawable.ic_popup_sync, R.string.retry_engine) { onRetryRequested() }
+    private val buttons = mutableListOf<CandidateItemView>()
+    private var previousSnapshot: EngineSnapshot? = null
+    private var expanded = false
+    private var lastStatus: InputEngineStatus? = null
+
+    init {
+        orientation = VERTICAL
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(72))
+        addView(LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(composition, LayoutParams(0, dp(24), 1f))
+            addView(progress, LayoutParams(dp(18), dp(18)))
+            addView(status, LayoutParams(LayoutParams.WRAP_CONTENT, dp(24)).apply { marginEnd = dp(8) })
+        }, LayoutParams(LayoutParams.MATCH_PARENT, dp(24)))
+        addView(LinearLayout(context).apply {
+            addView(scroll, LayoutParams(0, dp(48), 1f))
+            addView(retry, LayoutParams(dp(48), dp(48)))
+            addView(expand, LayoutParams(dp(48), dp(48)))
+        }, LayoutParams(LayoutParams.MATCH_PARENT, dp(48)))
+        renderStatus(InputEngineStatus.HIDDEN)
+    }
+
+    fun render(snapshot: EngineSnapshot) {
+        if (snapshot == previousSnapshot) return
+        val changedInput = snapshot.rawInput != previousSnapshot?.rawInput ||
+            snapshot.candidates != previousSnapshot?.candidates
+        previousSnapshot = snapshot
+        composition.text = snapshot.composition.ifEmpty { snapshot.rawInput }
+        while (buttons.size < snapshot.candidates.size) {
+            buttons += CandidateItemView(context).also { button ->
+                button.onSelected = { onCandidateSelected(it) }
+                candidates.addView(button, LayoutParams(LayoutParams.WRAP_CONTENT, dp(48)))
+            }
+        }
+        buttons.forEachIndexed { index, button ->
+            val candidate = snapshot.candidates.getOrNull(index)
+            button.visibility = if (candidate == null) View.GONE else View.VISIBLE
+            if (candidate != null) button.bind(candidate, index, index == snapshot.highlightedIndex) else button.clear()
+        }
+        expand.visibility = if (snapshot.candidates.isEmpty()) View.INVISIBLE else View.VISIBLE
+        if (changedInput) scroll.scrollTo(0, 0)
+        updateStatusVisibility()
+    }
+
+    fun setExpanded(value: Boolean) {
+        if (expanded == value) return
+        expanded = value
+        expand.setImageResource(if (value) android.R.drawable.arrow_up_float else android.R.drawable.arrow_down_float)
+        expand.contentDescription = context.getString(if (value) R.string.collapse_candidates else R.string.expand_candidates)
+    }
+
+    fun renderStatus(value: InputEngineStatus) {
+        if (value == lastStatus) return
+        lastStatus = value
+        val label = when (value) {
+            InputEngineStatus.PREPARING -> R.string.engine_preparing
+            InputEngineStatus.PENDING_CONFIGURATION -> R.string.engine_pending_configuration
+            InputEngineStatus.FAILED -> R.string.engine_failed
+            InputEngineStatus.READY -> R.string.engine_ready
+            InputEngineStatus.HIDDEN -> null
+        }
+        status.text = label?.let(context::getString).orEmpty()
+        progress.visibility = if (value == InputEngineStatus.PREPARING) View.VISIBLE else View.GONE
+        retry.visibility = if (value == InputEngineStatus.FAILED) View.VISIBLE else View.GONE
+        updateStatusVisibility()
+    }
+
+    private fun updateStatusVisibility() {
+        status.visibility = if (lastStatus == InputEngineStatus.READY && previousSnapshot?.isComposing == true)
+            View.GONE else View.VISIBLE
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+}

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">zero finish input</string>
+    <string name="input_method_name">zero finish input</string>
+    <string name="subtype_chinese">中文</string>
+    <string name="subtype_english">English</string>
+    <string name="secure_clipboard">安全剪贴板</string>
+    <string name="unlock_secure_clipboard">解锁安全剪贴板</string>
+    <string name="secure_clipboard_disabled">安全剪贴板未启用</string>
+    <string name="secure_clipboard_empty">暂无安全片段</string>
+    <string name="secure_clipboard_locked">安全剪贴板已锁定</string>
+    <string name="enable_secure_clipboard">认证并启用</string>
+    <string name="authenticating">等待系统认证</string>
+    <string name="authentication_failed">认证未完成</string>
+    <string name="operation_failed">操作失败</string>
+    <string name="navigate_up">返回</string>
+    <string name="add_secure_item">新增安全片段</string>
+    <string name="delete_secure_item">删除安全片段</string>
+    <string name="secure_item_label">标签（可选）</string>
+    <string name="secure_item_value">私密内容</string>
+    <string name="secure_item_required">请输入私密内容</string>
+    <string name="secure_item_details">%1$d 个字符 · %2$s</string>
+    <string name="cancel">取消</string>
+    <string name="save">保存</string>
+    <string name="delete">删除</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">英文</string>
+    <string name="user_dictionary_item_details">%1$s · %2$s · %3$d</string>
+    <string name="user_dictionary_add">新增词组</string>
+    <string name="user_dictionary_delete">删除词组</string>
+    <string name="user_dictionary_import">导入词组</string>
+    <string name="user_dictionary_export">导出词组</string>
+    <string name="user_dictionary_shortcut">输入码</string>
+    <string name="user_dictionary_value">词组</string>
+    <string name="user_dictionary_required">请输入输入码和词组</string>
+    <plurals name="user_dictionary_imported">
+        <item quantity="other">已导入 %1$d 条词组</item>
+    </plurals>
+    <string name="user_dictionary_exported">词组已导出</string>
+    <string name="user_dictionary_full">词库容量已达上限（20,000 条或 5 MiB），请先删除部分词组</string>
+    <string name="user_dictionary_too_large">导入文件不能超过 5 MiB</string>
+    <string name="user_dictionary_invalid">词组数据格式无效，未进行更新</string>
+    <string name="user_dictionary_export_warning">将以未加密的 JSON 文件导出全部中英文词组、输入码、词频和使用时间，不包含 emoji 或安全剪贴板。能访问保存位置的其他应用也能读取此文件。选择已有文件会覆盖其内容。</string>
+    <string name="user_dictionary_import_notice">导入 JSON 文件（最多 5 MiB），合并到现有词库。相同语言、输入码和词组的词频及使用时间将被更新。合并后最多 20,000 条、5 MiB；格式无效或超限时整次导入取消。</string>
+    <string name="clear_personal_data">清除个性化数据</string>
+    <string name="clear_personal_data_message">将删除本地用户词组、词频和 emoji 最近使用记录，且无法恢复。</string>
+    <string name="personal_data_cleared">个性化数据已清除</string>
+    <string name="chinese_input_settings">中文输入</string>
+    <string name="select_builtin_chinese">使用内置中文引擎</string>
+    <string name="chinese_script">输出文字</string>
+    <string name="script_simplified">简体</string>
+    <string name="script_traditional">繁体</string>
+    <string name="abbreviated_pinyin">简拼</string>
+    <string name="chinese_punctuation">中文标点</string>
+    <string name="candidate_page_size">每页候选数量</string>
+    <string name="fuzzy_pinyin">模糊拼音</string>
+    <string name="fuzzy_z_zh" translatable="false">z / zh</string>
+    <string name="fuzzy_c_ch" translatable="false">c / ch</string>
+    <string name="fuzzy_s_sh" translatable="false">s / sh</string>
+    <string name="fuzzy_n_l" translatable="false">n / l</string>
+    <string name="fuzzy_hu_fu" translatable="false">hu / fu</string>
+    <string name="fuzzy_an_ang" translatable="false">an / ang</string>
+    <string name="fuzzy_en_eng" translatable="false">en / eng</string>
+    <string name="fuzzy_in_ing" translatable="false">in / ing</string>
+    <string name="setting_learning">本地词频学习</string>
+    <string name="setting_incognito">隐私模式</string>
+    <string name="setting_haptics">按键振动</string>
+    <string name="setting_enabled">已启用</string>
+    <string name="setting_disabled">未启用</string>
+    <string name="setting_current">正在使用</string>
+    <string name="setting_not_selected">未选择</string>
+    <string name="section_input_method">输入法</string>
+    <string name="setting_system_status">系统状态</string>
+    <string name="setting_current_keyboard">当前键盘</string>
+    <string name="setting_enable">启用</string>
+    <string name="setting_switch">切换</string>
+    <string name="section_privacy">隐私</string>
+    <string name="section_data">数据</string>
+    <string name="setting_user_phrases">用户词组</string>
+    <string name="section_language_packs">语言包</string>
+    <string name="setting_import_pack">导入语言包</string>
+    <string name="section_input">输入</string>
+    <string name="section_engine">引擎</string>
+    <string name="setting_no_packs">未导入语言包</string>
+    <string name="engine_status_ready">Rime 全拼 · 已就绪</string>
+    <string name="engine_status_failed">基础输入 · 加载失败</string>
+    <string name="engine_status_preparing">正在准备</string>
+    <string name="engine_status_waiting">等待准备</string>
+    <string name="keyboard_layout">中文键盘</string>
+    <string name="keyboard_full">全键盘</string>
+    <string name="keyboard_nine">九键拼音</string>
+    <string name="engine_rime_name">Rime 拼音（默认）</string>
+    <string name="engine_dictionary_name">离线词典（测试）</string>
+    <string name="engine_dictionary_notice">仅含常用测试词组；不支持整句组词、简拼、模糊音、繁体和九键。</string>
+</resources>

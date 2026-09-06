@@ -1,0 +1,283 @@
+package dev.zeroinput.ime.personalization
+
+import dev.zeroinput.engine.api.InputLanguage
+import dev.zeroinput.engine.api.PersonalSuggestion
+import dev.zeroinput.engine.api.PersonalizationStore
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.util.concurrent.AbstractExecutorService
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+class QueuedPersonalizationStoreTest {
+    @Test
+    fun `constructor does not read the delegate before personalization is requested`() {
+        var preloadCalls = 0
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(
+            delegate = FakeStore(),
+            preload = { preloadCalls += 1 },
+            executor = executor,
+        )
+        try {
+            assertEquals(0, preloadCalls)
+            store.suggestionsFor("ni", InputLanguage.CHINESE, 3)
+            executor.runNext()
+            assertEquals(1, preloadCalls)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `suggestions stay non-blocking until preload completes`() {
+        val delegate = FakeStore()
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(delegate, preload = {}, executor = executor)
+        try {
+            assertEquals(emptyList<PersonalSuggestion>(), store.suggestionsFor("ni", InputLanguage.CHINESE, 3))
+
+            executor.runNext()
+            // Preload only makes the encrypted snapshot available.  The
+            // first cache miss is queued separately so the caller still does
+            // not execute the dictionary scan inline.
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext()
+            assertEquals("你好", store.suggestionsFor("ni", InputLanguage.CHINESE, 3).single().text)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `learning runs on the personalization worker`() {
+        val callerThread = Thread.currentThread().name
+        val delegate = FakeStore()
+        val store = QueuedPersonalizationStore(delegate, preload = {})
+        try {
+            store.learn("nihao", "你好", InputLanguage.CHINESE, learningAllowed = true)
+
+            assertTrue(delegate.learned.await(2, TimeUnit.SECONDS))
+            assertNotEquals(callerThread, delegate.learningThread)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `clear invalidates learning already queued before it`() {
+        val delegate = FakeStore()
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(delegate, preload = {}, executor = executor)
+        try {
+            store.learn("ni", "旧词", InputLanguage.CHINESE, learningAllowed = true)
+            store.clear()
+
+            // Preload, stale learn, and clear are FIFO on the worker.  The
+            // stale write must be skipped even if it has not started yet.
+            while (executor.hasTasks()) executor.runNext()
+
+            assertTrue(delegate.cleared)
+            assertTrue(delegate.learnedValues.isEmpty())
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `privacy invalidation discards learning already queued`() {
+        val delegate = FakeStore()
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(delegate, preload = {}, executor = executor)
+        try {
+            store.learn("ni", "旧会话词组", InputLanguage.CHINESE, learningAllowed = true)
+
+            store.invalidatePendingWrites()
+            while (executor.hasTasks()) executor.runNext()
+
+            assertTrue(delegate.learnedValues.isEmpty())
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `invalidated preload can be retried by a later permitted session`() {
+        var preloadCalls = 0
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(
+            delegate = FakeStore(),
+            preload = { preloadCalls += 1 },
+            executor = executor,
+        )
+        try {
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            store.invalidatePendingWrites()
+            executor.runNext()
+
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext()
+
+            // The invalidated preload is skipped before touching the
+            // encrypted delegate; only the retried generation performs I/O.
+            assertEquals(1, preloadCalls)
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext()
+            assertEquals(1, store.suggestionsFor("ni", InputLanguage.CHINESE, 3).size)
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `clear hides stale suggestions before the worker finishes`() {
+        val delegate = FakeStore()
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(delegate, preload = {}, executor = executor)
+        try {
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext() // preload
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext() // query
+            assertEquals(1, store.suggestionsFor("ni", InputLanguage.CHINESE, 3).size)
+
+            store.clear()
+
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext() // clear
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext() // query after clear
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `durable clear still completes when the worker rejects a control task`() {
+        val delegate = FakeStore()
+        val executor = TestExecutorService().apply { rejectSubmissions = true }
+        val store = QueuedPersonalizationStore(delegate, preload = {}, executor = executor)
+        try {
+            store.clearAndAwait()
+
+            assertTrue(delegate.cleared)
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun `listener is notified after preload and query complete`() {
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(FakeStore(), preload = {}, executor = executor)
+        var notifications = 0
+        val listener = store.addSuggestionListener { notifications += 1 }
+        try {
+            store.suggestionsFor("ni", InputLanguage.CHINESE, 3)
+            executor.runNext() // preload
+            assertEquals(1, notifications)
+
+            store.suggestionsFor("ni", InputLanguage.CHINESE, 3)
+            executor.runNext() // query
+            assertEquals(2, notifications)
+        } finally {
+            listener.close()
+            store.close()
+        }
+    }
+
+    @Test
+    fun `stale query result is discarded after privacy invalidation`() {
+        val delegate = FakeStore()
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(delegate, preload = {}, executor = executor)
+        try {
+            store.suggestionsFor("ni", InputLanguage.CHINESE, 3)
+            executor.runNext() // preload
+            store.suggestionsFor("ni", InputLanguage.CHINESE, 3)
+            store.invalidatePendingWrites()
+            executor.runNext() // stale query
+
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext() // fresh preload
+            assertTrue(store.suggestionsFor("ni", InputLanguage.CHINESE, 3).isEmpty())
+            executor.runNext() // fresh query
+            assertEquals(1, store.suggestionsFor("ni", InputLanguage.CHINESE, 3).size)
+        } finally {
+            store.close()
+        }
+    }
+
+    private class FakeStore : PersonalizationStore {
+        val learned = CountDownLatch(1)
+        var learningThread: String? = null
+        val learnedValues = mutableListOf<String>()
+        var cleared = false
+
+        override fun suggestionsFor(
+            prefix: String,
+            language: InputLanguage,
+            limit: Int,
+        ): List<PersonalSuggestion> = if (cleared) {
+            emptyList()
+        } else {
+            listOf(PersonalSuggestion("id", "你好", 2))
+        }
+
+        override fun learn(
+            shortcut: String,
+            value: String,
+            language: InputLanguage,
+            learningAllowed: Boolean,
+        ) {
+            learningThread = Thread.currentThread().name
+            learnedValues += value
+            learned.countDown()
+        }
+
+        override fun recordUse(id: String, learningAllowed: Boolean) = Unit
+
+        override fun clear() {
+            cleared = true
+            learnedValues.clear()
+        }
+
+    }
+
+    private class TestExecutorService : AbstractExecutorService() {
+        private val tasks = ArrayDeque<Runnable>()
+        private var shutdown = false
+        var rejectSubmissions = false
+
+        override fun execute(command: Runnable) {
+            check(!shutdown)
+            if (rejectSubmissions) throw java.util.concurrent.RejectedExecutionException()
+            tasks.addLast(command)
+        }
+
+        fun runNext() = tasks.removeFirst().run()
+
+        fun hasTasks(): Boolean = tasks.isNotEmpty()
+
+        override fun shutdown() {
+            shutdown = true
+        }
+
+        override fun shutdownNow(): List<Runnable> {
+            shutdown = true
+            return buildList {
+                while (tasks.isNotEmpty()) add(tasks.removeFirst())
+            }
+        }
+
+        override fun isShutdown(): Boolean = shutdown
+
+        override fun isTerminated(): Boolean = shutdown && tasks.isEmpty()
+
+        override fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean = isTerminated
+    }
+}

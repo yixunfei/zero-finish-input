@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="keyboard_settings">zero finish input 设置</string>
+    <string name="secure_clipboard_item">%1$s</string>
+    <string name="secure_clipboard_item_description">认证并粘贴 %1$s</string>
+    <string name="candidate_description">候选 %1$s</string>
+    <string name="expand_candidates">展开候选</string>
+    <string name="collapse_candidates">收起候选</string>
+    <string name="previous_candidates">上一页候选</string>
+    <string name="next_candidates">下一页候选</string>
+    <string name="retry_engine">重试中文输入</string>
+    <string name="engine_preparing">中文准备中</string>
+    <string name="engine_ready">中文已就绪</string>
+    <string name="engine_pending_configuration">待本次输入结束后应用</string>
+    <string name="engine_failed">中文加载失败</string>
+    <string name="script_short_simplified">简</string>
+    <string name="script_short_traditional">繁</string>
+    <string name="switch_chinese_script">切换简繁体</string>
+    <string name="pinyin_separator">拼音分隔</string>
+    <string name="key_backspace">退格</string>
+    <string name="key_comma">逗号</string>
+    <string name="key_period">句号</string>
+    <string name="key_symbols">符号键盘</string>
+    <string name="key_language">切换中英文</string>
+    <string name="key_space">空格</string>
+    <string name="key_enter">回车</string>
+    <string name="select_pinyin_reading">选择拼音 %1$s</string>
+    <string name="layout_nine_short">9键</string>
+    <string name="layout_full_short">26键</string>
+    <string name="switch_keyboard_layout">切换九键和全键盘</string>
+</resources>

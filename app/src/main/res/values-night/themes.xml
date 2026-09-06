@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ZeroInput" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/zero_primary</item>
+        <item name="colorOnPrimary">@color/zero_on_primary</item>
+        <item name="colorPrimaryContainer">@color/zero_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/zero_on_primary_container</item>
+        <item name="colorSecondary">@color/zero_secondary</item>
+        <item name="colorOnSecondary">@color/zero_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/zero_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/zero_on_secondary_container</item>
+        <item name="colorSurface">@color/zero_surface</item>
+        <item name="colorOnSurface">@color/zero_on_surface</item>
+        <item name="colorSurfaceVariant">@color/zero_surface_variant</item>
+        <item name="colorOutline">@color/zero_outline</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:navigationBarColor">@color/zero_surface</item>
+        <item name="android:statusBarColor">@color/zero_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <style name="Theme.ZeroInput.Authentication" parent="Theme.ZeroInput">
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.32</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+    <style name="Theme.ZeroInput.InputMethod" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimaryContainer">@color/zero_primary_container</item>
+        <item name="colorSecondaryContainer">@color/zero_secondary_container</item>
+        <item name="colorPrimary">@color/zero_primary</item>
+        <item name="colorPrimaryVariant">@color/zero_primary</item>
+        <item name="colorOnPrimary">@color/zero_on_primary</item>
+        <item name="colorSecondary">@color/zero_secondary</item>
+        <item name="colorSecondaryVariant">@color/zero_secondary</item>
+        <item name="colorOnSecondary">@color/zero_on_secondary</item>
+        <item name="colorSurface">@color/zero_surface</item>
+        <item name="colorOnSurface">@color/zero_on_surface</item>
+        <item name="colorSurfaceVariant">@color/zero_surface_variant</item>
+        <item name="colorOutline">@color/zero_outline</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:navigationBarColor">@color/zero_surface</item>
+        <item name="android:statusBarColor">@color/zero_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

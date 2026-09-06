@@ -1,0 +1,590 @@
+package dev.zeroinput.ime.core
+
+import android.view.inputmethod.EditorInfo
+import dev.zeroinput.engine.api.Candidate
+import dev.zeroinput.engine.api.CandidateTextNormalizer
+import dev.zeroinput.engine.api.EditorContext
+import dev.zeroinput.engine.api.EngineKey
+import dev.zeroinput.engine.api.EngineSnapshot
+import dev.zeroinput.engine.api.EngineUpdate
+import dev.zeroinput.engine.api.InputEngine
+import dev.zeroinput.engine.api.InputLanguage
+import dev.zeroinput.engine.api.PersonalizationStore
+import dev.zeroinput.engine.api.ReadingSelectionEngine
+import dev.zeroinput.engine.api.EngineDescriptor
+import dev.zeroinput.ime.core.privacy.EditorPrivacyPolicy
+import dev.zeroinput.ime.core.privacy.PrivacyConfiguration
+import dev.zeroinput.ime.core.privacy.SessionPrivacy
+
+class InputSessionController(
+    private val connection: EditorConnection,
+    private val engineProvider: (InputLanguage) -> InputEngine,
+    private val personalization: PersonalizationStore,
+    private val privacyPolicy: EditorPrivacyPolicy = EditorPrivacyPolicy(),
+    private val onStateChanged: (InputSessionState) -> Unit = {},
+    private val languagePackProvider: (String) -> InputEngine? = { null },
+    private val languagePackDiscoveryComplete: () -> Boolean = { true },
+    /**
+     * When true, [engineProvider] is expected to return a lightweight
+     * fallback.  Native and language-pack engines are installed later through
+     * [adoptPreparedEngine], so session creation never performs heavy work on
+     * the IME input thread.
+     */
+    private val deferHeavyEngineCreation: Boolean = false,
+) : AutoCloseable {
+    private var engine: InputEngine? = null
+    private var language = InputLanguage.CHINESE
+    private var languagePackKey: String? = null
+    private var editorInfo = EditorInfo()
+    private var privacy = SessionPrivacy(
+        isSensitive = false,
+        suggestionsAllowed = true,
+        learningAllowed = false,
+        reason = dev.zeroinput.ime.core.privacy.PrivacyReason.USER_DISABLED,
+    )
+    private var routes: List<CandidateRoute> = emptyList()
+    /**
+     * Engine-owned state without the personal-candidate overlay.  Keeping
+     * this snapshot separately lets a background personalization query
+     * refresh the visible candidates without replaying a key event or asking
+     * the engine to mutate its composition.
+     */
+    private var rawEngineSnapshot = EngineSnapshot.Empty
+
+    var state = InputSessionState()
+        private set
+
+    fun start(
+        editorInfo: EditorInfo,
+        initialLanguage: InputLanguage,
+        privacyConfiguration: PrivacyConfiguration,
+        languagePackKey: String? = null,
+    ) {
+        // A controller is normally created for one editor session, but making
+        // start idempotent keeps a reused instance from leaking a native
+        // engine or leaving a composing span owned by the previous editor.
+        val hadEngine = engine != null
+        closeEngine()
+        if (hadEngine) connection.clearComposingText()
+        this.editorInfo = editorInfo
+        privacy = privacyPolicy.evaluate(editorInfo, privacyConfiguration)
+        language = initialLanguage
+        this.languagePackKey = languagePackKey
+        replaceEngine()
+    }
+
+    /**
+     * Re-evaluates the active editor when a global privacy setting changes.
+     *
+     * A session must not continue using an older, more permissive policy after
+     * the user enables incognito mode or disables learning.  Clearing the
+     * pre-edit is deliberate: committing it could disclose text that the new
+     * policy is meant to protect.
+     *
+     * @return true when the engine/session state was recreated.
+     */
+    fun updatePrivacy(configuration: PrivacyConfiguration): Boolean {
+        val updated = privacyPolicy.evaluate(editorInfo, configuration)
+        if (updated == privacy) return false
+        privacy = updated
+        runCatching { engine?.reset() }
+            .onFailure { closeEngine() }
+        connection.clearComposingText()
+        replaceEngine()
+        return true
+    }
+
+    fun handle(command: InputCommand) {
+        if (privacy.isSensitive) {
+            handleSensitive(command)
+            return
+        }
+        val activeEngine = engine
+        if (activeEngine == null) {
+            // An optional/native engine can become unavailable while a
+            // session is open. Never drop user input just because the
+            // suggestion layer is unavailable; route basic editing directly
+            // to the editor until the next session can recreate the engine.
+            handleEditorFallback(command)
+            return
+        }
+        try {
+            when (command) {
+                is InputCommand.Text -> handleKey(activeEngine, EngineKey.Character(command.value))
+                is InputCommand.LiteralText -> commitLiteral(activeEngine, command.value)
+                InputCommand.Backspace -> handleKey(activeEngine, EngineKey.Backspace, fallbackBackspace = true)
+                InputCommand.Space -> handleKey(activeEngine, EngineKey.Space)
+                InputCommand.Enter -> handleEnter(activeEngine)
+                is InputCommand.SelectCandidate -> selectCandidate(activeEngine, command.visibleIndex)
+                is InputCommand.ChangeCandidatePage -> apply(activeEngine.changePage(command.direction))
+                is InputCommand.SelectReading -> (activeEngine as? ReadingSelectionEngine)?.let {
+                    apply(it.selectReading(command.index))
+                }
+            }
+        } catch (_: Throwable) {
+            // Native engines are optional and can fail after a session has
+            // already started (for example when a JNI call loses its native
+            // context).  Basic editing must remain usable in that case.
+            recoverFromEngineFailure(activeEngine)
+            handleEditorFallback(command)
+        }
+    }
+
+    fun switchLanguage() {
+        setLanguage(if (language == InputLanguage.CHINESE) InputLanguage.ENGLISH else InputLanguage.CHINESE)
+    }
+
+    fun setLanguage(target: InputLanguage, packKey: String? = null) {
+        if (language == target && languagePackKey == packKey) return
+        language = target
+        languagePackKey = packKey
+        connection.clearComposingText()
+        replaceEngine()
+    }
+
+    fun reset() {
+        runCatching { engine?.reset() }
+            .onFailure { closeEngine() }
+        connection.clearComposingText()
+        publish(EngineSnapshot.Empty)
+    }
+
+    /**
+     * Re-publishes the current engine state after an asynchronous personal
+     * suggestion query completes.  This method never changes the composing
+     * text or invokes the engine; callers should invoke it on the same thread
+     * that owns this controller (the IME main thread in the Android service).
+     */
+    fun refreshPersonalization() {
+        publish(rawEngineSnapshot)
+    }
+
+    override fun close() {
+        closeEngine()
+        routes = emptyList()
+        connection.clearComposingText()
+        // The input view can outlive the editor connection. Publish an empty
+        // snapshot so candidates from the previous application are never left
+        // visible while the IME is idle or between sessions.
+        publish(EngineSnapshot.Empty)
+    }
+
+    /**
+     * Re-attempts selecting the configured language-pack engine.  The app
+     * graph discovers packs asynchronously, so a session may initially have
+     * fallen back to the built-in engine before discovery completed.  A
+     * reload is only safe while there is no composing text; callers can retry
+     * after the current composition is committed.
+     */
+    fun reloadEngineIfIdle(): Boolean {
+        if (state.snapshot.isComposing) return false
+        replaceEngine()
+        return true
+    }
+
+    /** Backwards-compatible name for callers interested specifically in packs. */
+    fun reloadLanguagePackIfIdle(): Boolean = reloadEngineIfIdle()
+
+    /**
+     * Installs an engine that was prepared for this exact editor context.
+     * Sensitive/session changes and an active pre-edit reject the result and
+     * close it, preventing stale native state from crossing an editor
+     * boundary.  The caller retains no ownership after this method returns.
+     */
+    fun adoptPreparedEngine(prepared: PreparedInputEngine): Boolean {
+        if (!matches(prepared) || state.snapshot.isComposing) {
+            prepared.close()
+            return false
+        }
+        val candidate = prepared.takeEngine()
+        if (candidate == null) return false
+        closeEngine()
+        routes = emptyList()
+        engine = candidate
+        languagePackKey = prepared.languagePackKey
+        publish(prepared.snapshot)
+        return true
+    }
+
+    private fun replaceEngine() {
+        closeEngine()
+        routes = emptyList()
+        if (!privacy.suggestionsAllowed) {
+            // Sensitive editors do not need an engine at all. Avoid creating
+            // native sessions or loading dictionaries for a field that has
+            // explicitly opted out of suggestions.
+            publish(EngineSnapshot.Empty)
+            return
+        }
+
+        // The service uses a small in-memory fallback here.  The normal
+        // provider path remains available for pure-core callers and tests;
+        // Android integration installs expensive engines through the prepared
+        // engine handoff above.
+        if (deferHeavyEngineCreation) {
+            installImmediateEngine()
+            return
+        }
+
+        val requestedPackKey = languagePackKey
+        val packEngine = requestedPackKey?.let { key ->
+            runCatching { languagePackProvider(key) }.getOrNull()
+        }?.let { candidate ->
+            val supportsLanguage = runCatching {
+                language in candidate.descriptor.languages
+            }.getOrDefault(false)
+            if (supportsLanguage) {
+                candidate
+            } else {
+                closeSafely(candidate)
+                null
+            }
+        }
+        // A null pack engine can mean that asynchronous discovery has not
+        // completed yet.  Keep the requested key so the app can retry it when
+        // the registry publishes a refresh.  Once discovery is known to be
+        // complete, an absent key is stale and is cleared so the session state
+        // cannot advertise a package that is no longer installed.
+        val discoveryComplete = runCatching { languagePackDiscoveryComplete() }.getOrDefault(true)
+        if (requestedPackKey != null && packEngine == null && discoveryComplete) {
+            languagePackKey = null
+        }
+        if (packEngine != null) {
+            val snapshot = startEngine(packEngine)
+            if (snapshot != null) {
+                engine = packEngine
+                publish(snapshot)
+                return
+            }
+            closeSafely(packEngine)
+            languagePackKey = null
+        }
+
+        val baseEngine = runCatching { engineProvider(language) }.getOrNull()
+        val snapshot = baseEngine?.let(::startEngine)
+        if (snapshot != null) {
+            engine = baseEngine
+            publish(snapshot)
+        } else {
+            baseEngine?.let(::closeSafely)
+            // No engine is a supported state.  Input commands will use the
+            // direct editor path until a new session can create one.
+            publish(EngineSnapshot.Empty)
+        }
+    }
+
+    private fun installImmediateEngine() {
+        val immediate = runCatching { engineProvider(language) }.getOrNull()
+        val snapshot = immediate?.let(::startEngine)
+        if (snapshot != null) {
+            engine = immediate
+            publish(snapshot)
+        } else {
+            immediate?.let(::closeSafely)
+            publish(EngineSnapshot.Empty)
+        }
+    }
+
+    private fun matches(prepared: PreparedInputEngine): Boolean =
+        privacy.suggestionsAllowed &&
+            prepared.language == language &&
+            prepared.languagePackKey == languagePackKey &&
+            prepared.packageName == editorInfo.packageName &&
+            prepared.privacy == privacy &&
+            prepared.snapshot.isComposing.not() &&
+            runCatching { language in prepared.descriptor.languages }.getOrDefault(false)
+
+    private fun handleKey(activeEngine: InputEngine, key: EngineKey, fallbackBackspace: Boolean = false) {
+        // The published state is authoritative for the key's starting
+        // point. Adapter properties may lag behind the EngineUpdate that was
+        // already rendered to the user.
+        val before = state.snapshot
+        val learningShortcut = before.rawInput.ifBlank { before.composition }
+        val update = activeEngine.handle(key)
+        apply(update, learningShortcut)
+        if (update.consumed || update.committedText.isNotEmpty()) return
+
+        if (fallbackBackspace) {
+            if (reflectsBackspace(before, update.snapshot)) return
+            // Do not leave an unconsumed pre-edit span attached to the
+            // editor.  Commit the raw composition first, then route the
+            // backspace to the editor just like any other unconsumed key.
+            flushUnconsumedComposition(activeEngine, update.snapshot, before)
+            connection.deleteBeforeCursor()
+            return
+        }
+
+        val fallbackText = when (key) {
+            is EngineKey.Character -> key.text
+            EngineKey.Space -> " "
+            else -> null
+        } ?: return
+        if (key is EngineKey.Character && reflectsCharacter(before, update.snapshot, key.text)) return
+        commitUnconsumedKey(activeEngine, update.snapshot, before, fallbackText)
+    }
+
+    private fun apply(update: EngineUpdate, learningShortcut: String = "") {
+        if (update.committedText.isNotEmpty()) {
+            // commitText replaces the active composing span.  Finishing first
+            // would make the pre-edit (for example, "ni") permanent and then
+            // append the selected candidate (for example, "你").
+            connection.commitText(update.committedText)
+            if (privacy.personalizationAllowed) {
+                runCatching {
+                    personalization.learn(
+                        shortcut = learningShortcut.ifBlank { update.committedText },
+                        value = update.committedText,
+                        language = language,
+                        learningAllowed = privacy.learningAllowed,
+                    )
+                }
+            }
+        }
+        if (update.snapshot.composition.isNotEmpty()) {
+            if (update.committedText.isNotEmpty() || update.snapshot.composition != state.snapshot.composition) {
+                connection.setComposingText(update.snapshot.composition)
+            }
+        } else if (update.committedText.isEmpty() && state.snapshot.isComposing) {
+            // A commit already replaces Android's composing span. Paging and idle
+            // keys need no extra binder calls to rewrite or clear that span.
+            connection.clearComposingText()
+        }
+        publish(update.snapshot)
+    }
+
+    private fun handleEnter(activeEngine: InputEngine) {
+        // The controller's published snapshot is the view shown to the user
+        // and remains authoritative even when an adapter updates its mutable
+        // property lazily.  Fall back to the adapter only for engines that
+        // have not published a composing state yet.
+        val before = state.snapshot
+        if (!before.isComposing) {
+            performEnterAction()
+            return
+        }
+
+        val update = activeEngine.handle(EngineKey.Enter)
+        if (update.consumed || update.committedText.isNotEmpty()) {
+            apply(update, before.rawInput)
+            return
+        }
+
+        // The engine declined Enter. Commit the visible preedit before handing
+        // the key to the editor, and always clear the engine state.
+        val declinedSnapshot = update.snapshot.takeIf(EngineSnapshot::isComposing) ?: before
+        val rawComposition = declinedSnapshot.rawInput.ifBlank { declinedSnapshot.composition }
+        runCatching { activeEngine.reset() }
+            .onFailure { if (engine === activeEngine) closeEngine() }
+        commitRawComposition(rawComposition)
+        publish(EngineSnapshot.Empty)
+        performEnterAction()
+    }
+
+    private fun commitLiteral(activeEngine: InputEngine, text: String) {
+        if (text.isEmpty()) return
+        if (state.snapshot.isComposing) {
+            val before = state.snapshot
+            val update = activeEngine.handle(EngineKey.Enter)
+            apply(update, before.rawInput)
+            val remaining = update.snapshot.takeIf(EngineSnapshot::isComposing)
+                ?: before.takeIf { !update.consumed && update.committedText.isEmpty() }
+            flushUnconsumedComposition(activeEngine, remaining)
+        }
+        connection.commitText(text)
+    }
+
+    private fun performEnterAction() {
+        val action = editorInfo.imeOptions and EditorInfo.IME_MASK_ACTION
+        val handled = action != EditorInfo.IME_ACTION_NONE &&
+            action != EditorInfo.IME_ACTION_UNSPECIFIED &&
+            connection.performEditorAction(action)
+        if (!handled) connection.sendEnterKey()
+    }
+
+    private fun selectCandidate(activeEngine: InputEngine, visibleIndex: Int) {
+        when (val route = routes.getOrNull(visibleIndex)) {
+            is CandidateRoute.Engine -> {
+                // Use the last published state rather than the adapter's
+                // mutable property; native adapters may expose a stale
+                // snapshot between callbacks.
+                val learningShortcut = state.snapshot.rawInput
+                apply(activeEngine.selectCandidate(route.engineIndex), learningShortcut)
+            }
+            is CandidateRoute.Personal -> {
+                activeEngine.reset()
+                connection.commitText(route.text)
+                if (privacy.personalizationAllowed) {
+                    runCatching {
+                        personalization.recordUse(route.id, learningAllowed = privacy.learningAllowed)
+                    }
+                }
+                publish(EngineSnapshot.Empty)
+            }
+            null -> Unit
+        }
+    }
+
+    private fun handleSensitive(command: InputCommand) {
+        handleEditorFallback(command)
+    }
+
+    private fun handleEditorFallback(command: InputCommand) {
+        when (command) {
+            is InputCommand.Text -> connection.commitText(command.value)
+            is InputCommand.LiteralText -> connection.commitText(command.value)
+            InputCommand.Backspace -> connection.deleteBeforeCursor()
+            InputCommand.Space -> connection.commitText(" ")
+            InputCommand.Enter -> performEnterAction()
+            is InputCommand.SelectCandidate,
+            is InputCommand.SelectReading,
+            is InputCommand.ChangeCandidatePage,
+            -> Unit
+        }
+        publish(EngineSnapshot.Empty)
+    }
+
+    private fun publish(engineSnapshot: EngineSnapshot) {
+        rawEngineSnapshot = engineSnapshot
+        val personal = if (privacy.personalizationAllowed && engineSnapshot.rawInput.isNotBlank()) {
+            runCatching {
+                personalization.suggestionsFor(engineSnapshot.rawInput, language, MAX_PERSONAL_CANDIDATES)
+            }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        val personalCandidates = personal.mapNotNull { term ->
+            val text = runCatching {
+                (engine as? CandidateTextNormalizer)?.normalizeCandidateText(term.text) ?: term.text
+            }.getOrNull() ?: return@mapNotNull null
+            Candidate("personal:${term.id}", text, "个人词组", term.frequency)
+        }
+        val candidates = (personalCandidates + engineSnapshot.candidates).distinctBy(Candidate::text)
+        val highlightedId = engineSnapshot.candidates.getOrNull(engineSnapshot.highlightedIndex)?.id
+        val visibleSnapshot = engineSnapshot.copy(
+            candidates = candidates,
+            highlightedIndex = candidates.indexOfFirst { it.id == highlightedId }.coerceAtLeast(0),
+        )
+        // The update snapshot is the authoritative view for this event.  Do
+        // not resolve engine candidates through the engine's mutable
+        // `snapshot` property: adapters may publish that property lazily (or
+        // expose a stale value after a native callback), which would make a
+        // visible candidate unselectable or select the wrong index.
+        rebuildRoutes(visibleSnapshot, engineSnapshot)
+        state = InputSessionState(language, privacy, visibleSnapshot, languagePackKey, engine?.descriptor)
+        onStateChanged(state)
+    }
+
+    private fun commitUnconsumedKey(
+        activeEngine: InputEngine,
+        updateSnapshot: EngineSnapshot,
+        beforeSnapshot: EngineSnapshot,
+        text: String,
+    ) {
+        // Prefer the snapshot returned with this key event.  It is the only
+        // state that is guaranteed to describe the engine after the event;
+        // some adapters expose a stale property while returning an update.
+        val snapshot = updateSnapshot.takeIf(EngineSnapshot::isComposing)
+            ?: beforeSnapshot.takeIf(EngineSnapshot::isComposing)
+        flushUnconsumedComposition(activeEngine, snapshot, beforeSnapshot)
+        connection.commitText(text)
+    }
+
+    private fun flushUnconsumedComposition(
+        activeEngine: InputEngine,
+        snapshot: EngineSnapshot?,
+        beforeSnapshot: EngineSnapshot = EngineSnapshot.Empty,
+    ) {
+        val effectiveSnapshot = snapshot?.takeIf(EngineSnapshot::isComposing)
+            ?: beforeSnapshot.takeIf(EngineSnapshot::isComposing)
+            ?: return
+        val rawComposition = effectiveSnapshot.rawInput.ifBlank { effectiveSnapshot.composition }
+        runCatching { activeEngine.reset() }
+            .onFailure { if (engine === activeEngine) closeEngine() }
+        commitRawComposition(rawComposition)
+        publish(EngineSnapshot.Empty)
+    }
+
+    private fun reflectsCharacter(
+        before: EngineSnapshot,
+        after: EngineSnapshot,
+        text: String,
+    ): Boolean = text.isNotEmpty() && compositionInput(after) == compositionInput(before) + text
+
+    private fun reflectsBackspace(before: EngineSnapshot, after: EngineSnapshot): Boolean {
+        val previous = compositionInput(before)
+        if (previous.isEmpty()) return false
+        return compositionInput(after) == previous.dropLast(1)
+    }
+
+    private fun compositionInput(snapshot: EngineSnapshot): String =
+        snapshot.rawInput.ifEmpty { snapshot.composition }
+
+    private fun commitRawComposition(rawComposition: String) {
+        // Clear the composing span first so finishComposingText cannot commit
+        // the preedit a second time when the raw text is submitted explicitly.
+        connection.setComposingText("")
+        connection.finishComposingText()
+        if (rawComposition.isNotEmpty()) connection.commitText(rawComposition)
+    }
+
+    private fun rebuildRoutes(snapshot: EngineSnapshot, engineSnapshot: EngineSnapshot) {
+        routes = snapshot.candidates.map { candidate ->
+            if (candidate.id.startsWith("personal:")) {
+                CandidateRoute.Personal(candidate.id.removePrefix("personal:"), candidate.text)
+            } else {
+                val index = engineSnapshot.candidates.indexOfFirst { it.id == candidate.id }
+                CandidateRoute.Engine(index)
+            }
+        }
+    }
+
+    private fun startEngine(candidate: InputEngine): EngineSnapshot? = runCatching {
+        candidate.start(
+            EditorContext(language, privacy.isSensitive, privacy.learningAllowed, editorInfo.packageName),
+        )
+    }.getOrNull()
+
+    private fun closeEngine() {
+        engine?.let(::closeSafely)
+        engine = null
+    }
+
+    private fun closeSafely(candidate: InputEngine) {
+        runCatching { candidate.close() }
+    }
+
+    private fun recoverFromEngineFailure(failedEngine: InputEngine) {
+        val snapshot = state.snapshot.takeIf(EngineSnapshot::isComposing)
+        if (engine === failedEngine) closeEngine() else closeSafely(failedEngine)
+        if (snapshot != null) {
+            val raw = snapshot.rawInput.ifBlank { snapshot.composition }
+            commitRawComposition(raw)
+        } else {
+            connection.clearComposingText()
+        }
+        publish(EngineSnapshot.Empty)
+    }
+
+    private sealed interface CandidateRoute {
+        data class Engine(val engineIndex: Int) : CandidateRoute
+
+        data class Personal(val id: String, val text: String) : CandidateRoute
+    }
+
+    private companion object {
+        const val MAX_PERSONAL_CANDIDATES = 3
+    }
+}
+
+data class InputSessionState(
+    val language: InputLanguage = InputLanguage.CHINESE,
+    val privacy: SessionPrivacy = SessionPrivacy(
+        isSensitive = false,
+        suggestionsAllowed = true,
+        learningAllowed = false,
+        reason = dev.zeroinput.ime.core.privacy.PrivacyReason.USER_DISABLED,
+    ),
+    val snapshot: EngineSnapshot = EngineSnapshot.Empty,
+    val languagePackKey: String? = null,
+    val engineDescriptor: EngineDescriptor? = null,
+)

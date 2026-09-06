@@ -1,0 +1,230 @@
+package dev.zeroinput.userdata
+
+import android.content.Context
+import dev.zeroinput.security.AuthenticationGrant
+import dev.zeroinput.security.EncryptedFileStore
+import dev.zeroinput.security.SecurityAliases
+import org.json.JSONArray
+import org.json.JSONObject
+import java.nio.charset.StandardCharsets
+import java.util.UUID
+
+class SecureClipboardVault(context: Context) {
+    private val store = EncryptedFileStore(
+        context = context,
+        fileName = "secure-clipboard.bin",
+        keyAlias = SecurityAliases.SECURE_CLIPBOARD,
+    )
+    private val indexStore = EncryptedFileStore(
+        context = context,
+        fileName = "secure-clipboard-index.bin",
+        keyAlias = SecurityAliases.SECURE_CLIPBOARD_INDEX,
+    )
+    private val lock = Any()
+    /** Index entries contain no labels or正文 and are safe to cache in-process. */
+    private var indexCache: List<StoredSummary>? = null
+
+    fun count(): Int = synchronized(lock) { loadIndexSafely().size }
+
+    fun summaries(): List<SecureClipboardSummary> = synchronized(lock) {
+        loadIndexSafely().sortedByDescending(StoredSummary::updatedAtEpochMillis)
+            .mapIndexed { index, summary ->
+                SecureClipboardSummary(
+                    id = summary.id,
+                    displayName = "安全片段 ${index + 1}",
+                    updatedAtEpochMillis = summary.updatedAtEpochMillis,
+                )
+            }
+    }
+
+    fun read(id: String, grant: AuthenticationGrant): String? = synchronized(lock) {
+        require(grant.consume()) { "Authentication expired or was already used" }
+        val entries = load()
+        entries.firstOrNull { it.id == id }?.value.also { value ->
+            if (value == null) persistIndex(entries)
+        }
+    }
+
+    fun metadata(grant: AuthenticationGrant): List<SecureClipboardMetadata> = synchronized(lock) {
+        require(grant.consume()) { "Authentication expired or was already used" }
+        val entries = load().sortedByDescending(SecureClipboardEntry::updatedAtEpochMillis)
+        persistIndex(entries)
+        entries.map { it.toMetadata() }
+    }
+
+    fun add(label: String, value: String, grant: AuthenticationGrant): SecureClipboardMetadata = synchronized(lock) {
+        require(grant.consume()) { "Authentication expired or was already used" }
+        val cleanValue = validateValue(value)
+        val entries = load().toMutableList()
+        require(entries.size < MAX_ENTRIES) { "Secure clipboard is full" }
+        val entry = SecureClipboardEntry(
+            id = UUID.randomUUID().toString(),
+            label = validateLabel(label),
+            value = cleanValue,
+            updatedAtEpochMillis = System.currentTimeMillis(),
+        )
+        entries += entry
+        persist(entries)
+        persistIndex(entries)
+        entry.toMetadata()
+    }
+
+    fun remove(id: String, grant: AuthenticationGrant): Boolean = synchronized(lock) {
+        require(grant.consume()) { "Authentication expired or was already used" }
+        val entries = load().toMutableList()
+        val removed = entries.removeAll { it.id == id }
+        if (removed) {
+            persist(entries)
+            persistIndex(entries)
+        }
+        removed
+    }
+
+    fun clear(grant: AuthenticationGrant) = synchronized(lock) {
+        require(grant.consume()) { "Authentication expired or was already used" }
+        store.delete(deleteKey = true)
+        indexStore.delete(deleteKey = true)
+        indexCache = emptyList()
+    }
+
+    private fun load(): List<SecureClipboardEntry> {
+        val bytes = store.read() ?: return emptyList()
+        return try {
+            val root = JSONObject(String(bytes, StandardCharsets.UTF_8))
+            require(root.getInt("format") == FORMAT_VERSION) { "Unsupported secure clipboard format" }
+            val array = root.getJSONArray("entries")
+            require(array.length() <= MAX_ENTRIES) { "Secure clipboard has too many entries" }
+            List(array.length()) { index ->
+                val item = array.getJSONObject(index)
+                SecureClipboardEntry(
+                    id = validateId(item.getString("id")),
+                    label = validateLabel(item.getString("label")),
+                    value = validateValue(item.getString("value")),
+                    updatedAtEpochMillis = item.getLong("updatedAt").coerceAtLeast(0L),
+                )
+            }
+        } finally {
+            bytes.fill(0)
+        }
+    }
+
+    private fun loadIndexSafely(): List<StoredSummary> {
+        indexCache?.let { return it }
+        // Do not cache a transient decryption/I/O failure as an empty index.
+        // Keystore availability can briefly change while the device is
+        // unlocking; caching the failure would make the panel appear empty
+        // until a write or process restart repaired it.
+        return runCatching(::loadIndex)
+            .onSuccess { indexCache = it }
+            .getOrDefault(emptyList())
+    }
+
+    private fun loadIndex(): List<StoredSummary> {
+        val bytes = indexStore.read() ?: return emptyList()
+        return try {
+            val root = JSONObject(String(bytes, StandardCharsets.UTF_8))
+            require(root.getInt("format") == INDEX_FORMAT_VERSION) { "Unsupported secure clipboard index" }
+            val array = root.getJSONArray("entries")
+            require(array.length() <= MAX_ENTRIES) { "Secure clipboard index has too many entries" }
+            List(array.length()) { index ->
+                val item = array.getJSONObject(index)
+                StoredSummary(
+                    id = validateId(item.getString("id")),
+                    updatedAtEpochMillis = item.getLong("updatedAt").coerceAtLeast(0L),
+                )
+            }
+        } finally {
+            bytes.fill(0)
+        }
+    }
+
+    private fun persist(entries: List<SecureClipboardEntry>) {
+        val root = JSONObject().apply {
+            put("format", FORMAT_VERSION)
+            put("entries", JSONArray().apply {
+                entries.forEach { entry ->
+                    put(JSONObject().apply {
+                        put("id", entry.id)
+                        put("label", entry.label)
+                        put("value", entry.value)
+                        put("updatedAt", entry.updatedAtEpochMillis)
+                    })
+                }
+            })
+        }
+        store.write(root.toString().toByteArray(StandardCharsets.UTF_8))
+    }
+
+    private fun persistIndex(entries: List<SecureClipboardEntry>) {
+        val summaries = entries.map { entry ->
+            StoredSummary(entry.id, entry.updatedAtEpochMillis)
+        }
+        val root = JSONObject().apply {
+            put("format", INDEX_FORMAT_VERSION)
+            put("entries", JSONArray().apply {
+                summaries.forEach { entry ->
+                    put(JSONObject().apply {
+                        put("id", entry.id)
+                        put("updatedAt", entry.updatedAtEpochMillis)
+                    })
+                }
+            })
+        }
+        indexStore.write(root.toString().toByteArray(StandardCharsets.UTF_8))
+        indexCache = summaries
+    }
+
+    private fun validateId(value: String): String = value.also {
+        require(ID_PATTERN.matches(it)) { "Invalid secure clipboard entry id" }
+    }
+
+    private fun validateLabel(value: String): String = value.trim().take(MAX_LABEL_LENGTH).ifBlank { "私密片段" }
+
+    private fun validateValue(value: String): String = value.also {
+        require(it.isNotBlank() && it.length <= MAX_VALUE_LENGTH) { "Invalid secure clipboard value" }
+        require('\u0000' !in it) { "Secure clipboard value contains a null byte" }
+    }
+
+    private fun SecureClipboardEntry.toMetadata() = SecureClipboardMetadata(
+        id = id,
+        label = label,
+        valueLength = value.length,
+        updatedAtEpochMillis = updatedAtEpochMillis,
+    )
+
+    private companion object {
+        const val FORMAT_VERSION = 1
+        const val INDEX_FORMAT_VERSION = 1
+        const val MAX_ENTRIES = 100
+        const val MAX_LABEL_LENGTH = 64
+        const val MAX_VALUE_LENGTH = 8_192
+        val ID_PATTERN = Regex(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        )
+    }
+
+    private data class StoredSummary(
+        val id: String,
+        val updatedAtEpochMillis: Long,
+    )
+}
+
+data class SecureClipboardEntry(
+    val id: String,
+    val label: String,
+    val value: String,
+    val updatedAtEpochMillis: Long,
+)
+
+data class SecureClipboardSummary(
+    val id: String,
+    val displayName: String,
+    val updatedAtEpochMillis: Long,
+)
+
+data class SecureClipboardMetadata(
+    val id: String,
+    val label: String,
+    val valueLength: Int,
+    val updatedAtEpochMillis: Long,
+)

@@ -1,0 +1,130 @@
+# Threat model
+
+## Protected assets
+
+- 用户输入习惯、词组、词频和 emoji 最近使用记录。
+- 安全剪贴板中的私密片段。
+- 当前敏感输入会话中的文本。
+- 本地导入的语言包和用户主动导出的数据。
+
+## Enforced controls
+
+- Manifest 不含联网权限，CI 扫描项目源码中的联网权限和系统剪贴板 API，并解析 Debug/Release
+  合并清单执行权限白名单校验，防止依赖间接引入网络、存储或其他敏感权限。输入法服务不注册
+  剪贴板监听器；AndroidX 文本控件只可能在用户明确执行标准粘贴操作时进入系统编辑路径。
+- 除系统入口（启动页与输入法服务）外，Android 组件均不导出；输入法服务只使用系统要求的绑定权限。
+- `allowBackup=false` 且不启用数据提取规则。
+- 密码、PIN、可见密码及应用请求的无个性化输入上下文强制禁用学习和个性化数据读取；邮箱、
+  URI、隐身模式及用户关闭学习时同样不读取个人词组或 emoji 历史。运行中收紧隐私设置会立即
+  取消当前组合状态。
+- 常规用户数据和安全剪贴板使用不同的 Keystore 密钥。
+- librime 内建用户词典关闭，候选学习只通过加密的 `PersonalizationStore`。
+- 安全剪贴板默认关闭；读取由用户点击发起并要求系统身份认证。
+- 每次认证请求绑定发起时的输入会话、`InputConnection` 和用户交互序号。切换应用/输入框、结束
+  会话、设置/语言包/子类型变化或认证期间继续输入，都会使结果失效；认证回调、后台任务
+  启动和解密完成时各校验一次。
+- 安全剪贴板不向 Android 系统剪贴板同步内容，也不导出内容 Provider 或管理组件。
+- 未认证面板只读取独立的无标签索引；安全剪贴板正文不会为生成列表摘要而解密。
+- 安全剪贴板正文解密、索引读取和 emoji 历史读取均在 IME 主线程之外执行；仅无正文的展示模型
+  缓存在进程内，并在会话或隐私状态变化时隐藏或清空。清除个性化数据会使已排队的 emoji
+  历史写入失效；会话或隐私策略变化同样会使已排队的词组、词频和 emoji 写入失效。用户主动
+  清除会删除用户词组和 emoji 历史的专用 Keystore 密钥，实现密文与密钥一并擦除。
+- 输入会话首帧只使用轻量内存引擎；Rime 会话和语言包词典由共享有界后台队列创建、启动。
+  会话初始语言从当前 ZeroInput subtype（`zh-CN`/`en-US`）解析，回调缺失或乱序时才使用本地
+  语言设置，避免系统显示的 subtype 与实际引擎状态分离。
+  键盘上的语言切换同步系统子类型；系统回调仍执行交互失效和个性化任务取消，旧认证结果不能
+  因语言恢复或窗口重建而继续提交。
+  已准备引擎必须匹配会话令牌、编辑器包名、语言包键和隐私快照，且仅在无组合文本时接管；
+  会话切换、隐私收紧或任务取消会关闭过期 native/data 引擎，避免跨编辑器状态泄露和句柄泄漏。
+  后台结果在投递到 IME 线程前由生命周期所有权交接器托管；服务销毁、Handler 回调移除或投递
+  拒绝时会关闭仍未交接的引擎。
+- 所有应用层后台队列均有明确容量，取消时移除排队 Future；队列满时不回退到 IME 主线程，
+  仅丢弃可重试的预热、历史刷新或可选学习任务。用户主动清除个性化数据会先清理排队的旧
+  操作并串行执行删除；若耐久清除提交被拒绝，只允许设置页后台线程作最后一次同步重试。
+- 导入器限制文件大小、条目数、路径、扩展名和校验和，防止 zip slip 与 zip bomb。
+- release 构建关闭调试，源码不得记录输入文本。
+
+## Input configuration and interaction controls
+
+- Chinese preferences are immutable snapshots included in warm-up identity.
+  Changing options invalidates old preparation results and authenticated actions.
+  Adopting a prepared engine also cancels pending authenticated actions before
+  ownership changes; an idle native-session release notification alone does not.
+  Non-private settings wait for the current composition to finish; privacy
+  tightening still cancels composition and personalization immediately.
+- Generated Rime schemas contain only allowlisted switches and bounded pinyin
+  rules. They are created with a structured parser under noBackupFilesDir and
+  compiled on the bounded worker. Deployment never overwrites an index used by a
+  live native session; unused generated schemas and prisms are removed. User
+  dictionaries remain disabled in every generated schema.
+- Simplified/traditional conversion uses bundled, hash-verified OpenCC data.
+  Converters are initialized off the input thread. Personal suggestions are
+  converted only when personalization is permitted; conversion failures hide
+  those suggestions, and do not expose the underlying error or text.
+- Retry uses the lifecycle-owned preparation queue. Delayed completion after a
+  configuration/session change is rejected. Tests cover independent fuzzy flags,
+  disabled abbreviation/fuzzy behavior, delayed old configurations, and a live
+  session preventing deployment.
+- Candidate clicks carry their original binding generation. Removed views release
+  candidate text. Backspace timers stop on release, cancellation, panel changes,
+  privacy changes, input-view closure and session end. Clearing composition cannot
+  continue into committed editor text during the same hold.
+- Performance instrumentation is device-test-only and uses fixed public fixtures.
+  Reports contain durations and sample counts, never editor text or personal data.
+- Engine selection and Chinese layout are included in preparation identity.
+  Delayed results from another engine or layout are closed. The offline dictionary
+  engine loads only bundled public data and uses the existing encrypted
+  personalization port; it has no private dictionary, downloads or logging.
+- Nine-key reading replacement accepts only bounded Latin letters, telephone
+  digits and apostrophes across JNI. Reading history is bounded to 64 choices,
+  scoped to one engine and cleared on reset/commit/close. A fixed partial
+  candidate cannot be overwritten by reading replacement. Sensitive editors do
+  not instantiate a nine-key engine. Literal numeric input follows the same
+  editor privacy checks as ordinary keys.
+- New debug fixtures are nonexported and save no editor state. Layout images are
+  generated only by instrumentation from constructed public fixtures; runtime
+  input is never captured. Tests cover overlapping pointers, cancellation,
+  literal digits, rapid input and delayed old engine/layout preparation.
+
+## Editor and user lexicon hardening
+
+- Editor classes and variations have an explicit allowlist. Unknown classes,
+  `TYPE_NULL` and unknown variations are treated as sensitive before any user
+  preference can allow suggestions or learning. Session replacement clears old
+  composition/candidates and routes basic editing without creating an engine.
+- User dictionary import has a 5 MiB byte limit, 20,000-term limit, bounded scalar
+  lengths and a fixed three-container JSON structure. Unknown/duplicate fields,
+  nested scalar values, trailing documents, malformed UTF-8 and invalid language
+  names fail closed without retaining parser messages or causes. All validation
+  and merge-capacity checks finish before any persisted or cached data changes.
+- Imported IDs cannot identify a different local candidate. Matching phrase
+  identities preserve their local ID; new identities receive a fresh ID.
+- Repository writes publish memory only after encrypted persistence succeeds.
+  Clearing invalidates older waiting operations before serializing with in-flight
+  writes, then removes the ciphertext and key. Read and write byte buffers are
+  cleared in finally blocks; failed reads never become an empty cached dictionary.
+- User-initiated exports contain phrases, input codes, languages, frequencies and
+  usage times as plaintext JSON. A confirmation describes scope and exposure;
+  existing destinations are explicitly truncated only after data is available.
+  Document providers can expose/synchronize a user-selected destination outside
+  ZeroInput's control. ZeroInput itself never uploads or shares the file.
+- Device tests use in-memory fault injection and isolated fixture directories/key
+  aliases to verify capacity, malformed imports, failed writes, clear/write races,
+  ciphertext truncation/tampering and missing keys. Layout images contain only
+  constructed public fixtures, not personal dictionary contents.
+- A failed dictionary deletion blocks further reads and writes until deletion
+  succeeds, preventing a false empty export or a later update over incomplete erasure.
+
+## Out of scope
+
+- The initial v0.1.0 prerelease APK is debug-signed and debuggable. Authorized ADB
+  debugging can access a debug application's sandbox; this artifact is intended
+  for synthetic-data testing and does not carry production-release guarantees.
+  Production Release builds remain nondebuggable and unsigned until a maintainer
+  supplies a release key outside the repository. Signing keys are never published.
+  License/source notices are bundled in APK assets and alongside release downloads.
+
+- root、解锁 bootloader 后的系统级攻击。
+- 被恶意系统组件截屏、录屏或注入的输入。
+- 用户主动导出明文文件后的外部存储安全。
+- 目标应用自身读取已经提交给它的文本。

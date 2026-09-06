@@ -1,0 +1,19 @@
+zero finish input (formerly ZeroInput)
+Copyright 2026 ZeroInput contributors
+
+This product includes software developed by the RIME Developers and data
+from the Rime Luna Pinyin and Rime Essay projects. It also includes software
+from Boost, OpenCC, LevelDB, yaml-cpp, marisa-trie, AndroidX, Material
+Components for Android, Kotlin, and the Android NDK.
+
+The bundled OpenCC conversion data includes TSCharacters, TSPhrases,
+STCharacters and STPhrases from the pinned OpenCC source distribution,
+under the Apache License, Version 2.0.
+
+The nine-key syllable table is derived at build time from the bundled,
+pinned Luna Pinyin dictionary and retains its LGPL-3.0 data license.
+The ZeroInput Dictionary Test engine and its reference phrases are original
+ZeroInput contributions under the Apache License, Version 2.0.
+
+Copyright and license texts for those components are provided in LICENSES/
+and summarized in THIRD_PARTY.md.

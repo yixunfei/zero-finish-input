@@ -1,0 +1,6 @@
+set(Boost_FOUND TRUE)
+set(Boost_INCLUDE_DIRS "${BOOST_ROOT}")
+set(Boost_LIBRARIES)
+foreach(component IN LISTS BOOST_INCLUDE_LIBRARIES)
+  list(APPEND Boost_LIBRARIES "Boost::${component}")
+endforeach()
