@@ -19,6 +19,9 @@ internal class ClipboardGuardSettingsView(context: Context) : LinearLayout(conte
     var onBack: () -> Unit = {}
     var onNotificationPermission: () -> Unit = {}
     var onClear: () -> Unit = {}
+    var onRetry: () -> Unit = {}
+    var onOverlayPermission: () -> Unit = {}
+    var onOverlayPreview: () -> Unit = {}
     private var options = ClipboardGuardOptions()
     private var rendering = false
     private val status = label(16f)
@@ -28,7 +31,13 @@ internal class ClipboardGuardSettingsView(context: Context) : LinearLayout(conte
     private val authentication = toggle(R.string.clipboard_guard_authenticate) { options.copy(authenticate = it).normalized() }
     private val permissionStatus = label(14f).apply { setText(R.string.clipboard_guard_permission_missing) }
     private val permission = command(R.string.clipboard_guard_permission) { onNotificationPermission() }
-    private val clear = command(R.string.clipboard_guard_clear_current) { onClear() }
+    private val clear = command(R.string.clipboard_guard_inspect_current) { onClear() }
+    private val retry = command(R.string.clipboard_guard_retry) { onRetry() }
+    private val overlaySettings = ClipboardOverlaySettingsView(context).apply {
+        onOptions = { this@ClipboardGuardSettingsView.onOptions(it) }
+        onPermission = { onOverlayPermission() }
+        onPreview = { onOverlayPreview() }
+    }
     private val modes = ClipboardClearMode.entries.associateWith { mode ->
         MaterialRadioButton(context).apply {
             id = View.generateViewId()
@@ -69,15 +78,18 @@ internal class ClipboardGuardSettingsView(context: Context) : LinearLayout(conte
                 setPadding(dp(20), dp(12), dp(20), dp(24))
                 addView(label(14f).apply { setText(R.string.clipboard_guard_limit) }, row())
                 addView(status, row())
+                addView(label(14f).apply { setText(R.string.clipboard_guard_history_limit) }, row())
                 addView(listen, row())
                 addView(keyboard, row())
                 addView(notifications, row())
                 addView(permissionStatus, row())
                 addView(permission, row())
+                addView(overlaySettings, row())
                 addView(label(14f).apply { setText(R.string.clipboard_guard_clear_mode) }, row())
                 addView(modeGroup, row())
                 addView(authentication, row())
                 addView(clear, row())
+                addView(retry, row())
             })
         }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
@@ -87,7 +99,7 @@ internal class ClipboardGuardSettingsView(context: Context) : LinearLayout(conte
         }
     }
 
-    fun render(value: ClipboardGuardOptions, state: ClipboardGuardState, notificationAllowed: Boolean) {
+    fun render(value: ClipboardGuardOptions, state: ClipboardGuardState, notificationAllowed: Boolean, overlayAllowed: Boolean = false) {
         options = value
         rendering = true
         try {
@@ -95,24 +107,19 @@ internal class ClipboardGuardSettingsView(context: Context) : LinearLayout(conte
             keyboard.isChecked = value.keyboardReminder
             notifications.isChecked = value.notificationReminder
             authentication.isChecked = value.authenticate
+            overlaySettings.render(value, overlayAllowed)
             modeGroup.check(modes.getValue(value.clearMode).id)
             modes.getValue(ClipboardClearMode.AUTOMATIC).isEnabled = !value.authenticate
             permission.visibility = if (value.notificationReminder && !notificationAllowed) VISIBLE else GONE
             permissionStatus.visibility = permission.visibility
-            clear.isEnabled = value == state.options && value.listening && value.clearMode != ClipboardClearMode.NONE && state.ticket != null
+            clear.isEnabled = value == state.options && value.listening && state.status != ClipboardGuardStatus.NOT_DEFAULT
+            retry.isEnabled = value.listening
             val visibleStatus = when {
                 !value.listening -> ClipboardGuardStatus.OFF
                 value != state.options -> ClipboardGuardStatus.UNAVAILABLE
                 else -> state.status
             }
-            status.setText(when (visibleStatus) {
-                ClipboardGuardStatus.OFF -> R.string.clipboard_guard_off
-                ClipboardGuardStatus.UNAVAILABLE -> R.string.clipboard_guard_unavailable
-                ClipboardGuardStatus.WAITING -> R.string.clipboard_guard_waiting
-                ClipboardGuardStatus.CHANGED -> R.string.clipboard_guard_changed
-                ClipboardGuardStatus.CLEARED -> R.string.clipboard_guard_cleared
-                ClipboardGuardStatus.FAILED -> R.string.clipboard_guard_failed
-            })
+            status.setText(state.copy(status = visibleStatus, accessIssue = state.accessIssue.takeIf { visibleStatus == state.status }).statusText())
         } finally { rendering = false }
     }
 

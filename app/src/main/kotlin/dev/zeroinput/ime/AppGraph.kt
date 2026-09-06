@@ -48,6 +48,15 @@ class AppGraph(context: Context) : AutoCloseable {
     )
     val personalization: dev.zeroinput.engine.api.PersonalizationStore = queuedPersonalization
     val emojiHistory = EmojiHistoryRepository(applicationContext)
+    val expressions = dev.zeroinput.userdata.PersonalExpressionRepository(applicationContext)
+    private val expressionListeners = CopyOnWriteArrayList<() -> Unit>()
+
+    fun notifyExpressionsChanged() { expressionListeners.forEach { runCatching(it) } }
+
+    fun observeExpressions(listener: () -> Unit): AutoCloseable {
+        expressionListeners += listener
+        return AutoCloseable { expressionListeners -= listener }
+    }
     val secureClipboard = SecureClipboardVault(applicationContext)
     val languagePacks = LanguagePackInstaller(applicationContext)
     val languagePackRegistry = LanguagePackRegistry(languagePacks)
@@ -180,6 +189,8 @@ class AppGraph(context: Context) : AutoCloseable {
         // cannot resurrect the old dictionary on the next launch.
         queuedPersonalization.clearAndAwait()
         emojiHistory.clear()
+        expressions.clear()
+        notifyExpressionsChanged()
         personalizationListeners.forEach { listener -> runCatching(listener) }
     }
 
@@ -210,6 +221,7 @@ class AppGraph(context: Context) : AutoCloseable {
         languagePackSnapshot = emptyList()
         languagePackListeners.clear()
         personalizationListeners.clear()
+        expressionListeners.clear()
         languagePackRegistry.close()
         rime.close()
     }

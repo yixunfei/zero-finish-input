@@ -153,6 +153,59 @@ class ClipboardGuardSessionTest {
         assertTrue(fixture.policy.state.options.listening)
     }
 
+    @Test
+    fun manualInspectionFindsPreexistingContentAndRequiresAnotherActionEvenInAutomaticMode() {
+        for (mode in ClipboardClearMode.entries) {
+            val fixture = Fixture()
+            fixture.port.stamp = 10
+            fixture.policy.start(ClipboardGuardOptions(listening = true, clearMode = mode))
+            val inspected = fixture.policy.inspectCurrent { true }
+            val ticket = checkNotNull(inspected.ticket)
+            assertTrue(ticket.userRequested)
+            assertEquals(0, fixture.port.clears)
+            assertEquals(ClipboardClearResult.CLEARED, fixture.policy.clear(ticket.id))
+        }
+    }
+
+    @Test
+    fun manualInspectionNeverBypassesAuthenticationAndDoesNotReadWhenDisabled() {
+        val fixture = Fixture()
+        fixture.policy.inspectCurrent { true }
+        assertEquals(0, fixture.port.reads)
+        fixture.policy.start(ClipboardGuardOptions(listening = true, authenticate = true))
+        fixture.port.stamp = 10
+        val ticket = checkNotNull(fixture.policy.inspectCurrent { true }.ticket)
+        assertEquals(ClipboardClearResult.AUTHENTICATION_REQUIRED, fixture.policy.clear(ticket.id))
+        assertEquals(0, fixture.port.clears)
+    }
+
+    @Test
+    fun successiveAutomaticCleanupsHaveDistinctReminderIdentities() {
+        val fixture = Fixture()
+        fixture.policy.start(ClipboardGuardOptions(listening = true, clearMode = ClipboardClearMode.AUTOMATIC))
+        fixture.port.stamp = 10
+        fixture.policy.changed()
+        val first = fixture.policy.state
+        fixture.port.stamp = 11
+        fixture.policy.changed()
+        val second = fixture.policy.state
+        assertEquals(ClipboardGuardStatus.CLEARED, first.status)
+        assertEquals(ClipboardGuardStatus.CLEARED, second.status)
+        assertTrue(first.eventId != second.eventId)
+        assertEquals(2, fixture.port.clears)
+    }
+
+    @Test
+    fun explicitPlatformDenialHasASeparateStatusAndNeverClaimsCleanupSucceeded() {
+        val fixture = Fixture()
+        fixture.port.onRead = { throw ClipboardAccessException(ClipboardAccessIssue.READ_DENIED) }
+        fixture.policy.start(ClipboardGuardOptions(listening = true))
+        assertEquals(ClipboardGuardStatus.BLOCKED, fixture.policy.state.status)
+        assertEquals(ClipboardAccessIssue.READ_DENIED, fixture.policy.state.accessIssue)
+        assertNull(fixture.policy.inspectCurrent { true }.ticket)
+        assertEquals(0, fixture.port.clears)
+    }
+
     private fun prepared() = Fixture().apply {
         policy.start(ClipboardGuardOptions(listening = true, clearMode = ClipboardClearMode.CONFIRM))
         port.stamp = 1

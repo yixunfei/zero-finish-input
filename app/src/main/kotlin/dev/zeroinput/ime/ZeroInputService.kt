@@ -31,6 +31,11 @@ import dev.zeroinput.ime.ui.KeyboardAction
 import dev.zeroinput.ime.ui.SecureClipboardItemUi
 import dev.zeroinput.ime.ui.ZeroInputView
 import dev.zeroinput.ime.ui.InputEngineStatus
+import dev.zeroinput.ime.ui.EmojiCatalog
+import dev.zeroinput.ime.ui.EmojiEntry
+import dev.zeroinput.ime.ui.PersonalExpressionsUi
+import dev.zeroinput.ime.expressions.presentation
+import dev.zeroinput.ime.expressions.ExpressionManagerActivity
 import java.util.Locale
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
@@ -38,10 +43,14 @@ import java.util.concurrent.atomic.AtomicLong
 
 class ZeroInputService : InputMethodService() {
     private var clipboardGuardObserver: AutoCloseable? = null
+    private var expressionObserver: AutoCloseable? = null
+    private var personalExpressionCache = PersonalExpressionsUi()
+    private var personalExpressionRevision = -1L
     private val graph: AppGraph
         get() = (application as ZeroInputApplication).graph
 
     private var inputView: ZeroInputView? = null
+    private var inputViewActive = false
     private var controller: InputSessionController? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val secureClipboardExecutor = BoundedExecutors.singleThread(
@@ -109,6 +118,13 @@ class ZeroInputService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        expressionObserver = graph.observeExpressions {
+            mainHandler.post {
+                personalExpressionCache = PersonalExpressionsUi()
+                personalExpressionRevision = -1L
+                inputView?.let(::renderLocalPanels)
+            }
+        }
         graph.clipboardGuard.attachIme()
         clipboardGuardObserver = graph.clipboardGuard.observe { state ->
             inputView?.renderClipboardGuard(state.options.listening && state.options.keyboardReminder, state.ticket != null)
@@ -261,6 +277,12 @@ class ZeroInputService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        inputViewActive = true
+        if (graph.clipboardGuard.state.status in setOf(
+                dev.zeroinput.ime.clipboardguard.ClipboardGuardStatus.UNAVAILABLE,
+                dev.zeroinput.ime.clipboardguard.ClipboardGuardStatus.BLOCKED,
+                dev.zeroinput.ime.clipboardguard.ClipboardGuardStatus.FAILED,
+            )) graph.clipboardGuard.retryMonitoring()
         updateNavigationBarAppearance()
         syncSessionPrivacy()
         reconcileChineseOptions()
@@ -282,6 +304,10 @@ class ZeroInputService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         inputView?.cancelPendingGestures()
+        inputViewActive = false
+        invalidatePendingPersonalization()
+        clearLocalPanelCaches()
+        inputView?.renderExpressions(false, PersonalExpressionsUi(), emptyList())
         super.onFinishInputView(finishingInput)
     }
 
@@ -295,6 +321,8 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        expressionObserver?.close()
+        expressionObserver = null
         clipboardGuardObserver?.close()
         clipboardGuardObserver = null
         graph.clipboardGuard.detachIme()
@@ -385,7 +413,7 @@ class ZeroInputService : InputMethodService() {
             registerInteraction()
             launchActivity(ClipboardGuardSettingsActivity::class.java)
         }
-        view.onUserInteraction = ::registerInteraction
+        view.onUserInteraction = { registerInteraction(); syncSessionPrivacy() }
         view.onKeyboardAction = ::handleKeyboardAction
         view.onClearCompositionRequested = {
             registerInteraction()
@@ -418,6 +446,15 @@ class ZeroInputService : InputMethodService() {
         }
         view.onCandidatePageChanged = { handleControllerCommand(InputCommand.ChangeCandidatePage(it)) }
         view.onEmojiSelected = ::commitEmoji
+        view.onExpressionFavoriteRequested = ::setExpressionFavorite
+        view.onExpressionManagementRequested = { id ->
+            registerInteraction()
+            syncSessionPrivacy()
+            if (activeSession?.controller?.state?.privacy?.personalizationAllowed == true) {
+                startActivity(Intent(this, ExpressionManagerActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(ExpressionManagerActivity.EDIT_ID, id))
+            }
+        }
         view.onSecureClipboardSelected = ::unlockAndCommitSecureItem
         view.onSettingsRequested = {
             registerInteraction()
@@ -489,7 +526,7 @@ class ZeroInputService : InputMethodService() {
         }
     }
 
-    private fun commitEmoji(value: String) {
+    private fun commitEmoji(entry: EmojiEntry) {
         registerInteraction()
         syncSessionPrivacy()
         val session = activeSession ?: return
@@ -497,11 +534,13 @@ class ZeroInputService : InputMethodService() {
         val boundConnection = session.connectionBinding.resolve(connection) ?: return
         if (!isSessionActive(session, boundConnection)) return
         val personalizationAllowed = session.controller.state.privacy.personalizationAllowed
+        if (!expressionIsCurrent(entry, personalizationAllowed)) return
+        val value = entry.value
         val emojiRevision = graph.emojiHistory.currentRevision()
         val writeGeneration = personalizationWriteGeneration.get()
         session.controller.reset()
         if (!isSessionActive(session, boundConnection)) return
-        boundConnection.commitText(value, 1)
+        if (!boundConnection.commitText(value, 1)) return
         if (personalizationAllowed) {
             // Recording history is encrypted I/O and must not delay the key
             // event that just committed the emoji.
@@ -509,7 +548,9 @@ class ZeroInputService : InputMethodService() {
                 BoundedExecutors.purge(localDataExecutor)
                 localDataExecutor.execute {
                     if (personalizationWriteGeneration.get() == writeGeneration) {
-                        runCatching { graph.emojiHistory.recordIfRevision(value, emojiRevision) }
+                        runCatching { graph.emojiHistory.recordIfRevision(value, emojiRevision) {
+                            personalizationWriteGeneration.get() == writeGeneration
+                        } }
                     }
                     mainHandler.post {
                         if (activeSession === session &&
@@ -541,6 +582,35 @@ class ZeroInputService : InputMethodService() {
             inputView?.let(::renderLocalPanels)
             scheduleEngineWarmup(session, force = true)
         }
+    }
+
+    private fun expressionIsCurrent(entry: EmojiEntry, allowed: Boolean): Boolean = if (entry.customId == null) {
+        EmojiCatalog.find(entry.value) == entry
+    } else {
+        allowed && personalExpressionRevision == graph.expressions.revision() && entry in personalExpressionCache.custom
+    }
+
+    private fun setExpressionFavorite(entry: EmojiEntry, selected: Boolean) {
+        registerInteraction()
+        syncSessionPrivacy()
+        val session = activeSession ?: return
+        if (!session.controller.state.privacy.personalizationAllowed || !expressionIsCurrent(entry, true)) return
+        val generation = personalizationWriteGeneration.get()
+        val deletion = graph.expressions.generation()
+        val contentRevision = graph.expressions.revision()
+        val current = { personalizationWriteGeneration.get() == generation &&
+            activeSession === session && (entry.customId == null || contentRevision == graph.expressions.revision()) }
+        runCatching {
+            localDataExecutor.execute {
+                val result = runCatching { graph.expressions.favorite(entry.value, selected, deletion, current) }
+                if (result.isSuccess) graph.notifyExpressionsChanged()
+                mainHandler.post {
+                    if (personalizationWriteGeneration.get() != generation || activeSession !== session) return@post
+                    if (result.isFailure) Toast.makeText(this, R.string.expression_operation_failed, Toast.LENGTH_SHORT).show()
+                    inputView?.let(::renderLocalPanels)
+                }
+            }
+        }.onFailure { Toast.makeText(this, R.string.expression_operation_failed, Toast.LENGTH_SHORT).show() }
     }
 
     private fun unlockAndCommitSecureItem(id: String) {
@@ -609,27 +679,39 @@ class ZeroInputService : InputMethodService() {
 
     private fun renderLocalPanels(view: ZeroInputView) {
         val session = activeSession
-        val personalizationAllowed = session?.controller?.state?.privacy?.personalizationAllowed == true
+        val personalizationAllowed = inputViewActive && session?.controller?.state?.privacy?.personalizationAllowed == true
         val sensitive = session?.controller?.state?.privacy?.isSensitive == true
         // Do not offer authenticated private snippets from a password/PIN
         // editor.  This prevents an accidental secure-clipboard paste into a
         // credential field while preserving the feature in ordinary editors.
         val enabled = session != null && graph.settings.secureClipboardEnabled && !sensitive
         if (!personalizationAllowed) recentEmojiCache = emptyList()
+        if (!personalizationAllowed || personalExpressionRevision != graph.expressions.revision()) {
+            personalExpressionCache = PersonalExpressionsUi()
+        }
         if (!enabled) secureClipboardCache = emptyList()
-        view.renderRecentEmoji(if (personalizationAllowed) recentEmojiCache else emptyList())
+        view.renderExpressions(personalizationAllowed, personalExpressionCache, if (personalizationAllowed) recentEmojiCache else emptyList())
         view.renderSecureClipboard(enabled, if (enabled) secureClipboardCache else emptyList())
         scheduleLocalPanelRefresh(personalizationAllowed, enabled)
     }
 
     private fun scheduleLocalPanelRefresh(personalizationAllowed: Boolean, secureClipboardEnabled: Boolean) {
         val revision = ++localPanelRevision
+        val session = activeSession
+        val generation = personalizationWriteGeneration.get()
+        val deletion = graph.expressions.generation()
+        val current = { revision == localPanelRevision && activeSession === session &&
+            generation == personalizationWriteGeneration.get() }
         localPanelTask?.cancel(false)
         BoundedExecutors.purge(localDataExecutor)
         localPanelTask = runCatching {
             localDataExecutor.submit {
-                val recent = if (personalizationAllowed) {
-                    runCatching { graph.emojiHistory.recent() }.getOrDefault(emptyList())
+                if (!current()) return@submit
+                val personal = if (personalizationAllowed) {
+                    runCatching { graph.expressions.snapshot(deletion, current) }.getOrNull()
+                } else null
+                val recent = if (personalizationAllowed && current()) {
+                    runCatching { graph.emojiHistory.recent(isCurrent = current) }.getOrDefault(emptyList())
                 } else {
                     emptyList()
                 }
@@ -643,9 +725,9 @@ class ZeroInputService : InputMethodService() {
                     emptyList()
                 }
                 mainHandler.post {
-                    if (revision != localPanelRevision || inputView == null) return@post
+                    if (!current() || inputView == null) return@post
                     val currentPersonalizationAllowed =
-                        activeSession?.controller?.state?.privacy?.personalizationAllowed == true
+                        inputViewActive && activeSession?.controller?.state?.privacy?.personalizationAllowed == true
                     val currentSession = activeSession
                     val currentSecureClipboardEnabled = currentSession != null &&
                         graph.settings.secureClipboardEnabled &&
@@ -655,9 +737,10 @@ class ZeroInputService : InputMethodService() {
                     // completed a read that started under the old policy.
                     recentEmojiCache = if (currentPersonalizationAllowed) recent else emptyList()
                     secureClipboardCache = if (currentSecureClipboardEnabled) secureItems else emptyList()
-                    inputView?.renderRecentEmoji(
-                        if (currentPersonalizationAllowed) recentEmojiCache else emptyList(),
-                    )
+                    personalExpressionRevision = personal?.revision ?: -1L
+                    personalExpressionCache = if (currentPersonalizationAllowed && personal != null &&
+                        personal.revision == graph.expressions.revision()) personal.data.presentation() else PersonalExpressionsUi()
+                    inputView?.renderExpressions(currentPersonalizationAllowed, personalExpressionCache, recentEmojiCache)
                     inputView?.renderSecureClipboard(
                         currentSecureClipboardEnabled,
                         if (currentSecureClipboardEnabled) secureClipboardCache else emptyList(),
@@ -816,11 +899,7 @@ class ZeroInputService : InputMethodService() {
         nativeRetryRequested = false
         invalidatePendingPersonalization()
         cancelEngineWarmup(clearInstalled = true)
-        localPanelRevision++
-        localPanelTask?.cancel(false)
-        BoundedExecutors.purge(localDataExecutor)
-        recentEmojiCache = emptyList()
-        secureClipboardCache = emptyList()
+        clearLocalPanelCaches()
         activeSession?.let { session ->
             if (reset) session.controller.reset()
             session.controller.close()
@@ -830,6 +909,17 @@ class ZeroInputService : InputMethodService() {
         languagePackReloadPending = false
         engineReloadPending = false
         cancelSecureClipboardRequest()
+    }
+
+    private fun clearLocalPanelCaches() {
+        localPanelRevision++
+        localPanelTask?.cancel(false)
+        BoundedExecutors.purge(localDataExecutor)
+        recentEmojiCache = emptyList()
+        personalExpressionCache = PersonalExpressionsUi()
+        personalExpressionRevision = -1L
+        inputView?.clearExpressionSession()
+        secureClipboardCache = emptyList()
     }
 
     private fun reconcileLanguagePackSession(session: InputSession) {

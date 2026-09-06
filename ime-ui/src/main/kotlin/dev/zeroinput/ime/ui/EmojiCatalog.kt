@@ -1,22 +1,5 @@
 package dev.zeroinput.ime.ui
 
-enum class EmojiCategory(val marker: String, val description: String) {
-    RECENT("◷", "最近使用"),
-    SMILEYS("☺", "表情"),
-    PEOPLE("☝", "人物"),
-    NATURE("♣", "自然"),
-    FOOD("●", "食物"),
-    ACTIVITY("★", "活动"),
-    OBJECTS("◆", "物品"),
-    SYMBOLS("♥", "符号"),
-}
-
-data class EmojiEntry(
-    val value: String,
-    val category: EmojiCategory,
-    val keywords: String,
-)
-
 object EmojiCatalog {
     val entries = listOf(
         entry("😀", EmojiCategory.SMILEYS, "笑 开心 smile happy grin"),
@@ -96,19 +79,25 @@ object EmojiCatalog {
         entry("❓", EmojiCategory.SYMBOLS, "问题 question"),
         entry("‼️", EmojiCategory.SYMBOLS, "注意 感叹 important"),
         entry("✨", EmojiCategory.SYMBOLS, "闪亮 sparkles"),
-    )
+    ) + AdditionalEmoji.entries + KaomojiCatalog.entries
+
+    private val byValue = entries.associateBy(EmojiEntry::value)
+
+    fun find(value: String): EmojiEntry? = byValue[value]
 
     fun search(query: String): List<EmojiEntry> {
-        val normalized = query.trim().lowercase()
-        return if (normalized.isEmpty()) entries else entries.filter { normalized in it.keywords.lowercase() }
+        return search(query, entries)
     }
 
-    fun recent(values: List<String>): List<EmojiEntry> = values.map { value ->
-        entries.firstOrNull { it.value == value }?.copy(category = EmojiCategory.RECENT)
-            ?: EmojiEntry(value, EmojiCategory.RECENT, "recent 最近")
+    fun search(query: String, source: List<EmojiEntry>): List<EmojiEntry> {
+        val terms = query.take(128).trim().lowercase(java.util.Locale.ROOT).split(Regex("\\s+"))
+            .filter(String::isNotEmpty)
+        if (terms.isEmpty()) return source
+        return source.filter { entry -> terms.all { it in entry.searchText } }
     }
+
+    fun recent(values: List<String>): List<EmojiEntry> = values.distinct().mapNotNull(byValue::get)
 
     private fun entry(value: String, category: EmojiCategory, keywords: String) =
         EmojiEntry(value, category, keywords)
 }
-

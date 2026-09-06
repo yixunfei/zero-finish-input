@@ -54,6 +54,50 @@ class SystemClipboardPlatformTest {
     }
 
     @Test
+    fun copyingInADifferentApplicationClearsTheCurrentItemAndCanShowAnOverlay() {
+        val support = ClipboardDeviceTestSupport
+        val context = instrumentation.targetContext
+        val graph = (context.applicationContext as ZeroInputApplication).graph
+        val original = graph.clipboardGuardPreferences.options
+        assumeTrue(!original.listening)
+        assumeTrue("Select ZeroInput before running cross-application clipboard tests", ComponentName.unflattenFromString(
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD).orEmpty(),
+        ) == ComponentName(context, ZeroInputService::class.java))
+        val port = AndroidSystemClipboard(context)
+        var fixtureTimestamp: Long? = null
+        val activity = instrumentation.startActivitySync(Intent(context, InputFixtureActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InputFixtureActivity
+        try {
+            assumeTrue(port.timestamp() == null)
+            support.withOverlayPermission(true) {
+                support.onMain { graph.clipboardGuardPreferences.options = ClipboardGuardOptions(
+                    listening = true, clearMode = ClipboardClearMode.AUTOMATIC, overlayReminder = true, overlaySeconds = 10,
+                ) }
+                await { graph.clipboardGuard.state.status == ClipboardGuardStatus.WAITING }
+                support.onMain { activity.finish() }
+                support.startSource()
+                support.click("Copy public fixture")
+                fixtureTimestamp = port.timestamp()
+                await { graph.clipboardGuard.state.status == ClipboardGuardStatus.CLEARED }
+                assertNull(port.timestamp())
+                await { support.overlayWindows().size == 1 }
+                val first = graph.clipboardGuard.state.eventId
+                support.click("Copy public fixture")
+                fixtureTimestamp = port.timestamp()
+                await { graph.clipboardGuard.state.eventId != first && graph.clipboardGuard.state.status == ClipboardGuardStatus.CLEARED }
+                assertNull(port.timestamp())
+                await { support.overlayWindows().size == 1 }
+            }
+        } finally {
+            support.onMain { graph.clipboardGuardPreferences.options = original; activity.finish() }
+            await { graph.clipboardGuard.state.status == ClipboardGuardStatus.OFF }
+            if (fixtureTimestamp != null && port.timestamp() == fixtureTimestamp) port.clear()
+            support.findText("Close public fixture")?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            support.flushGuardPreferences()
+        }
+    }
+
+    @Test
     fun publicFixtureTriggersMetadataCallbackAndCanBeClearedWithoutReadingItsBody() {
         val context = instrumentation.targetContext
         assumeTrue("Run with the real guard disabled", !ClipboardGuardPreferences(context).options.listening)
@@ -85,6 +129,7 @@ class SystemClipboardPlatformTest {
             registration?.close()
             if (fixtureTimestamp != null && port.timestamp() == fixtureTimestamp) port.clear()
             instrumentation.runOnMainSync { activity.finish() }
+            ClipboardDeviceTestSupport.flushGuardPreferences()
         }
     }
 
@@ -120,6 +165,7 @@ class SystemClipboardPlatformTest {
             await { graph.clipboardGuard.state.status == ClipboardGuardStatus.OFF }
             if (fixtureTimestamp != null && port.timestamp() == fixtureTimestamp) port.clear()
             instrumentation.runOnMainSync { activity.finish() }
+            ClipboardDeviceTestSupport.flushGuardPreferences()
         }
     }
 

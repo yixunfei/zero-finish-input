@@ -2,7 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
+            android:name=".testing.ExpressionManagerFixtureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".testing.InputFixtureActivity"
+            android:configChanges="orientation|screenSize"
             android:exported="false"
             android:excludeFromRecents="true"
             android:windowSoftInputMode="stateAlwaysVisible|adjustResize" />

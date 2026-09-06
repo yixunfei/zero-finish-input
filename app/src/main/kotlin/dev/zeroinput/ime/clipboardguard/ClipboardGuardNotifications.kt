@@ -38,11 +38,7 @@ internal class ClipboardGuardNotifications(private val context: Context) {
         val notification = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_delete)
             .setContentTitle(context.getString(R.string.clipboard_guard_title))
-            .setContentText(context.getString(when (state.status) {
-                ClipboardGuardStatus.CLEARED -> R.string.clipboard_guard_cleared
-                ClipboardGuardStatus.FAILED -> R.string.clipboard_guard_failed
-                else -> R.string.clipboard_guard_changed
-            }))
+            .setContentText(context.getString(state.statusText()))
             .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)

@@ -145,8 +145,8 @@ class InputPanelTest {
     @Test
     fun landscapeEmojiSearchKeepsEveryKeyboardRowAndPanelControlInsideWindow() = onMain {
         val panel = panel(false, landscape = true)
-        button(panel, "emoji").performClick()
-        button(panel, "搜索 emoji").performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_smileys)).performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_search)).performClick()
         measure(panel, 800, 360)
         val keyboard = visible(panel).filterIsInstance<KeyboardPanel>().single()
         val emoji = visible(panel).filterIsInstance<EmojiPanelView>().single()
@@ -211,14 +211,14 @@ class InputPanelTest {
         button(panel, "返回键盘").performClick()
         assertTrue(visible(panel).any { it is KeyboardPanel })
         assertFalse(visible(panel).any { it is SecureClipboardPanelView })
-        button(panel, "emoji").performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_smileys)).performClick()
         measure(panel, 320)
         assertLabelsFit(panel)
-        button(panel, "搜索 emoji").performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_search)).performClick()
         measure(panel, 320)
         val searchHeight = panel.measuredHeight
         button(panel, "返回键盘").performClick()
-        button(panel, "emoji").performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_smileys)).performClick()
         measure(panel, 320)
         assertTrue("Returning to active emoji search must preserve its height", panel.measuredHeight == searchHeight)
         assertTrue("Panel changes must invalidate pending authenticated actions", interactions >= 5)

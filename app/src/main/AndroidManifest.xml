@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <uses-feature
         android:name="android.hardware.touchscreen"
@@ -41,6 +42,14 @@
             android:name=".settings.SecureClipboardManagerActivity"
             android:excludeFromRecents="true"
             android:exported="false"
+            android:parentActivityName=".settings.MainActivity"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".expressions.ExpressionManagerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.ZeroInput.PrivateImport"
             android:parentActivityName=".settings.MainActivity"
             android:windowSoftInputMode="adjustResize" />
 

@@ -17,6 +17,10 @@ internal class ClipboardGuardPreferences(private val preferences: SharedPreferen
                 clearMode = ClipboardClearMode.entries.firstOrNull { it.name == snapshot["clear-mode"] }
                     ?: ClipboardClearMode.NONE,
                 authenticate = snapshot["authenticate"] as? Boolean ?: false,
+                overlayReminder = snapshot["overlay-reminder"] as? Boolean ?: false,
+                overlayPosition = ClipboardOverlayPosition.entries.firstOrNull { it.name == snapshot["overlay-position"] }
+                    ?: ClipboardOverlayPosition.TOP,
+                overlaySeconds = snapshot["overlay-seconds"] as? Int ?: 5,
             ).normalized()
         }
         set(value) {
@@ -27,6 +31,9 @@ internal class ClipboardGuardPreferences(private val preferences: SharedPreferen
                 putBoolean("notification-reminder", options.notificationReminder)
                 putString("clear-mode", options.clearMode.name)
                 putBoolean("authenticate", options.authenticate)
+                putBoolean("overlay-reminder", options.overlayReminder)
+                putString("overlay-position", options.overlayPosition.name)
+                putInt("overlay-seconds", options.overlaySeconds)
             }
         }
 

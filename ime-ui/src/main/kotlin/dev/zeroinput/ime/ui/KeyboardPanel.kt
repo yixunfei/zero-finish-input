@@ -66,7 +66,8 @@ class KeyboardPanel @JvmOverloads constructor(
 
     private fun addRow(specs: List<KeySpec>) {
         val row = KeyboardRow(context, specs.map(KeySpec::widthWeight)).apply {
-            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(KEY_ROW_HEIGHT_DP))
+            val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (landscape) 48 else KEY_ROW_HEIGHT_DP))
         }
         specs.forEach { spec -> row.addView(createKey(spec)) }
         addView(row)

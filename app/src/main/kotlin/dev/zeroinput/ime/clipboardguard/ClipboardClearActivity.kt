@@ -65,7 +65,8 @@ class ClipboardClearActivity : AppCompatActivity() {
         val state = graph.clipboardGuard.state
         return active.get() && ticket.isNotEmpty() && state.ticket?.id == ticket &&
             graph.clipboardGuardPreferences.options.listening &&
-            graph.clipboardGuardPreferences.options == state.options && state.options.clearMode != ClipboardClearMode.NONE
+            graph.clipboardGuardPreferences.options == state.options &&
+            (state.options.clearMode != ClipboardClearMode.NONE || state.ticket.userRequested)
     }
 
     private fun showConfirmation() {

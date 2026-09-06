@@ -43,19 +43,21 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
     private var lastStatus: InputEngineStatus? = null
 
     init {
-        orientation = VERTICAL
-        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(72))
-        addView(LinearLayout(context).apply {
+        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        orientation = if (landscape) HORIZONTAL else VERTICAL
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(if (landscape) 48 else 72))
+        val statusRow = LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(composition, LayoutParams(0, dp(24), 1f))
             addView(progress, LayoutParams(dp(18), dp(18)))
             addView(status, LayoutParams(LayoutParams.WRAP_CONTENT, dp(24)).apply { marginEnd = dp(8) })
-        }, LayoutParams(LayoutParams.MATCH_PARENT, dp(24)))
+        }
+        addView(statusRow, if (landscape) LayoutParams(0, dp(48), 1f) else LayoutParams(LayoutParams.MATCH_PARENT, dp(24)))
         addView(LinearLayout(context).apply {
             addView(scroll, LayoutParams(0, dp(48), 1f))
             addView(retry, LayoutParams(dp(48), dp(48)))
             addView(expand, LayoutParams(dp(48), dp(48)))
-        }, LayoutParams(LayoutParams.MATCH_PARENT, dp(48)))
+        }, if (landscape) LayoutParams(0, dp(48), 3f) else LayoutParams(LayoutParams.MATCH_PARENT, dp(48)))
         renderStatus(InputEngineStatus.HIDDEN)
     }
 

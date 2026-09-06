@@ -43,7 +43,7 @@ class ClipboardGuardPanelTest {
                 measure(view, width, height)
                 assertEquals(0, changes)
                 val switches = descendants(view).filterIsInstance<MaterialSwitch>()
-                assertEquals(4, switches.size)
+                assertEquals(5, switches.size)
                 assertTrue(switches.none { it.isChecked })
                 val radios = descendants(view).filterIsInstance<RadioButton>()
                 assertEquals(3, radios.size)
@@ -60,6 +60,23 @@ class ClipboardGuardPanelTest {
                 descendants(view).filterIsInstance<ScrollView>().single().scrollTo(0, view.height * 10)
                 saveFixture(view, "guard-${locale.language}-$night-$width-bottom.png")
                 verifyText(view)
+            }
+        }
+    }
+
+    @Test
+    fun overlayLabelsFitNarrowAndLandscapeWindowsWithoutSecretContent() = onMain {
+        for (night in listOf(false, true)) for (locale in listOf(Locale.ENGLISH, Locale.SIMPLIFIED_CHINESE)) {
+            for (width in listOf(288, 360)) {
+                val context = themed(locale, night)
+                val view = ClipboardGuardOverlayView(context, R.string.clipboard_guard_overlay_preview_message,
+                    canClear = true, onOpen = {}, onDismiss = {})
+                view.measure(View.MeasureSpec.makeMeasureSpec(dp(view, width), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+                verifyText(view)
+                assertTrue(view.height <= dp(view, 256))
+                saveFixture(view, "guard-overlay-${locale.language}-$night-$width.png")
             }
         }
     }
@@ -101,6 +118,7 @@ class ClipboardGuardPanelTest {
         }
         val permissions = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS).requestedPermissions
         assertTrue(Manifest.permission.POST_NOTIFICATIONS in permissions.orEmpty())
+        assertTrue(Manifest.permission.SYSTEM_ALERT_WINDOW in permissions.orEmpty())
     }
 
     @Test

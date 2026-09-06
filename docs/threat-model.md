@@ -161,6 +161,13 @@
   revoke the worker lease. Queued and delayed work cannot retain authorization.
   Startup establishes a baseline without acting on preexisting content. Duplicate
   callbacks and empty updates do not cause repeated clears.
+- An explicit foreground inspection can issue a fresh, user-requested ticket for
+  an existing item even when no callback arrived. Inspection never auto-clears;
+  confirmation and optional authentication remain required. Cancelling the page,
+  settings changes or default-IME changes invalidate queued inspection results.
+  Locked devices and explicit platform denials are distinguished from generic
+  failures. A null metadata response is described as empty or unavailable, since
+  public APIs do not consistently distinguish an empty clipboard from denial.
 - Android offers no atomic compare-and-clear. Timestamp checks reduce stale
   requests, but timestamps may collide and a new write between check and clear may
   also be erased. Callbacks cannot distinguish intentional Copy from an accident.
@@ -174,6 +181,56 @@
   use synthetic metadata or a single fixed public fixture, skipping platform
   mutation when existing clipboard metadata is present. No real clipboard body
   is read or included in tests, snapshots or diagnostics. See ADR 0007.
+
+## Optional application overlay
+
+- SYSTEM_ALERT_WINDOW is user-approved solely for a separately enabled, default-off
+  clipboard reminder. A reason-and-limit dialog precedes opening system permission
+  settings, including retries. Cancelling education never enables the option or
+  launches the system page. Permission denial leaves the reminder unavailable.
+- The window contains generic status, a dismiss control and a navigation action.
+  It never contains clipboard text, source names, authentication state or selected
+  page text. FLAG_NOT_FOCUSABLE avoids capturing input and FLAG_SECURE prevents
+  screenshots of the live window. Its touch region is bounded to its visible box.
+- Only one window exists; events coalesce by opaque identity and time out after
+  3, 5 or 10 seconds. Settings/lifecycle invalidation, lock screen, permission
+  revocation, dismissal and entering a ZeroInput Activity remove the window.
+  Test preview is an explicit exception for the nonsensitive guard settings page.
+- A tap navigates to the existing secure confirmation page; it cannot issue a
+  cleanup or authenticate in the background. There is no new exported production
+  component, foreground service, accessibility service, polling or full-screen
+  notification. System/OEM hiding and background lifecycle restrictions still
+  apply. The permission cannot recover missing clipboard callbacks or erase other
+  applications' histories. See ADR 0008.
+- The instrumentation APK has a separate-UID source Activity containing only a
+  fixed public fixture, native selection/copy and a text-share action. It is absent
+  from both production variants. Tests never inspect another app's private data.
+
+## Personal expression controls
+
+- Favorites, custom text, names and keywords use a dedicated AES-GCM file/key
+  under noBackupFilesDir. They are excluded from phrase exports and Android
+  backups. The new management Activity is nonexported, excluded from recents and
+  FLAG_SECURE; it disables autofill, content capture and saved drafts.
+- The fixed binary decoder limits bytes, entries and every UTF-8 string before
+  allocation. Invalid lengths, malformed UTF-8, duplicate entries, controls,
+  trailing data and unknown versions fail closed with content-free errors.
+- Reads and writes use background workers. A snapshot/operation must match the
+  session/privacy generation at execution and delivery. Custom selections must
+  also match the current library revision. Ending the input view clears personal
+  rows, queries and caches; stale views and delayed callbacks cannot expose them.
+- Explicitly managed entries obey the same IME privacy policy as recent history:
+  passwords, PIN, email, URI, no-personalization flags, incognito and disabled
+  learning hide all personal expressions and prevent IME history/favorite writes.
+- Clear personal data invalidates queued mutations and deletes the new file/key
+  as well as phrases/history. Failed deletion blocks access until retry. History
+  format 1 is preserved with a larger text bound and strict decoding. Unsaved
+  mutations cannot appear as successful history; old custom history values are
+  not offered after the associated custom entry is removed or edited.
+- No system clipboard, authentication grant, runtime network, exported component
+  or permission is added for expressions. Public source data and notices are
+  bundled and hash-checked during the build. Keystore fault, cancellation,
+  clear/write race and privacy-revocation tests use constructed public fixtures.
 
 ## Out of scope
 

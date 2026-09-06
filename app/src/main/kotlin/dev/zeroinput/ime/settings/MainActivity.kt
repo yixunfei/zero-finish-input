@@ -111,6 +111,9 @@ class MainActivity : AppCompatActivity() {
             render()
         }
         screen.onDictionaryRequested = { startActivity(Intent(this, UserDictionaryActivity::class.java)) }
+        screen.onExpressionsRequested = {
+            startActivity(Intent(this, dev.zeroinput.ime.expressions.ExpressionManagerActivity::class.java))
+        }
         screen.onPersonalDataClearRequested = ::confirmClearPersonalData
         screen.onSecureClipboardRequested = {
             startActivity(Intent(this, SecureClipboardManagerActivity::class.java))

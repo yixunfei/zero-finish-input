@@ -1,0 +1,58 @@
+package dev.zeroinput.ime.ui
+
+/** Bounded, in-memory filtering only. The host owns all personal data access. */
+internal class ExpressionBrowserState {
+    var category = EmojiCategory.SMILEYS
+    var group: KaomojiGroup? = null
+    var searchActive = false
+    var query = ""
+        private set
+    var personalizationAllowed = false
+        private set
+    var personal = PersonalExpressionsUi()
+        private set
+    private var recent = emptyList<String>()
+
+    fun renderPersonal(allowed: Boolean, data: PersonalExpressionsUi, values: List<String>) {
+        if (!allowed && personalizationAllowed) clearQuery()
+        personalizationAllowed = allowed
+        personal = if (allowed) data else PersonalExpressionsUi()
+        recent = if (allowed) values.take(128) else emptyList()
+    }
+
+    fun append(value: String) {
+        if (!searchActive) return
+        val room = 64 - query.codePointCount(0, query.length)
+        if (room <= 0) return
+        val count = minOf(room, value.codePointCount(0, value.length))
+        query += value.substring(0, value.offsetByCodePoints(0, count))
+    }
+
+    fun backspace() {
+        if (searchActive && query.isNotEmpty()) query = query.substring(0, query.offsetByCodePoints(query.length, -1))
+    }
+
+    fun clearQuery() { query = "" }
+
+    fun visible(): List<EmojiEntry> {
+        val all = EmojiCatalog.entries + personal.custom
+        val source = when {
+            category == EmojiCategory.RECENT -> {
+                val indexed = all.associateBy(EmojiEntry::value)
+                recent.distinct().mapNotNull(indexed::get)
+            }
+            category == EmojiCategory.FAVORITES -> all.filter { it.value in personal.favorites }
+            category == EmojiCategory.CUSTOM -> personal.custom
+            category == EmojiCategory.KAOMOJI -> all.filter { it.isWide && (group == null || it.group == group) }
+            searchActive -> all
+            else -> all.filter { it.category == category }
+        }
+        return if (searchActive) EmojiCatalog.search(query, source) else source
+    }
+
+    fun clearSession() {
+        renderPersonal(false, PersonalExpressionsUi(), emptyList())
+        query = ""
+        searchActive = false
+    }
+}

@@ -62,7 +62,7 @@ class ClipboardGuardRuntimeTest {
         assertEquals(ClipboardClearResult.EXPIRED, outcome.get())
         assertEquals(0, fixture.port.clears.get())
         fixture.port.notifyChanged()
-        await { fixture.runtime.state.status == ClipboardGuardStatus.UNAVAILABLE }
+        await { fixture.runtime.state.status == ClipboardGuardStatus.NOT_DEFAULT }
         assertEquals(null, fixture.port.listener.get())
     }
 
@@ -102,6 +102,62 @@ class ClipboardGuardRuntimeTest {
         assertEquals(null, fixture.port.listener.get())
     }
 
+    @Test
+    fun foregroundInspectionWithoutAnImeServiceTargetsExistingContentWithoutAutomaticCleanup() = withFixture { fixture ->
+        fixture.port.stamp = 42
+        fixture.configure(ClipboardGuardOptions(listening = true, clearMode = ClipboardClearMode.AUTOMATIC))
+        await { fixture.runtime.state.status == ClipboardGuardStatus.UNAVAILABLE }
+        val inspected = AtomicReference<ClipboardGuardState>()
+        fixture.runtime.inspectCurrent({ true }, inspected::set)
+        await { inspected.get() != null }
+        val ticket = checkNotNull(inspected.get().ticket)
+        assertTrue(ticket.userRequested)
+        assertEquals(0, fixture.port.clears.get())
+        assertEquals(null, fixture.port.listener.get())
+        val outcome = AtomicReference<ClipboardClearResult>()
+        fixture.runtime.clear(ticket.id, null, { true }, outcome::set)
+        await { outcome.get() != null }
+        assertEquals(ClipboardClearResult.CLEARED, outcome.get())
+    }
+
+    @Test
+    fun failedPlatformCreationCompletesInspectionAndAllowsRetry() = withFixture { fixture ->
+        fixture.configure(ClipboardGuardOptions(listening = true))
+        await { fixture.runtime.state.status == ClipboardGuardStatus.UNAVAILABLE }
+        fixture.failCreation.set(true)
+        val inspected = AtomicReference<ClipboardGuardState>()
+        fixture.runtime.inspectCurrent({ true }, inspected::set)
+        await { inspected.get() != null && fixture.runtime.state.status == ClipboardGuardStatus.FAILED }
+        assertEquals(ClipboardGuardStatus.FAILED, inspected.get().status)
+        assertEquals(null, inspected.get().ticket)
+        fixture.failCreation.set(false)
+        fixture.runtime.retryMonitoring()
+        await { fixture.runtime.state.status == ClipboardGuardStatus.UNAVAILABLE }
+        fixture.port.stamp = 42
+        inspected.set(null)
+        fixture.runtime.inspectCurrent({ true }, inspected::set)
+        await { inspected.get()?.ticket != null }
+        assertEquals(0, fixture.port.clears.get())
+    }
+
+    @Test
+    fun cancellingAnInspectionWhileThePlatformIsBlockedCannotIssueATicket() = withFixture { fixture ->
+        fixture.start(ClipboardClearMode.CONFIRM)
+        fixture.port.stamp = 42
+        val active = AtomicBoolean(true)
+        val block = ReadBlock()
+        fixture.port.block.set(block)
+        val inspected = AtomicReference<ClipboardGuardState>()
+        fixture.runtime.inspectCurrent(active::get, inspected::set)
+        assertTrue(block.entered.await(5, TimeUnit.SECONDS))
+        active.set(false)
+        block.release.countDown()
+        await { inspected.get() != null }
+        assertEquals(null, inspected.get().ticket)
+        assertEquals(null, fixture.runtime.state.ticket)
+        assertEquals(0, fixture.port.clears.get())
+    }
+
     private fun withFixture(test: (Fixture) -> Unit) {
         val fixture = Fixture()
         try { test(fixture) } finally {
@@ -119,8 +175,9 @@ class ClipboardGuardRuntimeTest {
         val port = FakeClipboard()
         val selected = AtomicBoolean(true)
         val created = AtomicInteger()
+        val failCreation = AtomicBoolean()
         val runtime = ClipboardGuardRuntime(instrumentation.targetContext, preferences,
-            createClipboard = { created.incrementAndGet(); port }, isDefaultIme = selected::get)
+            createClipboard = { check(!failCreation.get()); created.incrementAndGet(); port }, isDefaultIme = selected::get)
 
         fun configure(options: ClipboardGuardOptions) {
             instrumentation.runOnMainSync { preferences.options = options }

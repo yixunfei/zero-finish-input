@@ -20,6 +20,16 @@ class InputFixtureActivity : Activity() {
             isSaveEnabled = false
         }
         setContentView(editor)
+        if (intent.getBooleanExtra("fullscreen_fixture", false)) {
+            editor.setBackgroundColor(android.graphics.Color.rgb(24, 168, 96))
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            }
+        }
         editor.requestFocus()
         editor.post { getSystemService(InputMethodManager::class.java).showSoftInput(editor, 0) }
     }

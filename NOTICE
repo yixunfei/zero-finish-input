@@ -17,3 +17,10 @@ ZeroInput contributions under the Apache License, Version 2.0.
 
 Copyright and license texts for those components are provided in LICENSES/
 and summarized in THIRD_PARTY.md.
+
+Kaomoji expression data is adapted from rimeinn/rime-kaomoji, revision
+e66d8f26ee47b4a2a840983b7d71ed69b5ecf756, under LGPL-3.0.
+The adaptation preserves expression spacing, adjusts categories and adds greeting
+and sleep entries. Both original data and the adapted KaomojiCatalog.kt source
+are distributed under assets/expressions/ in the APK. Its license texts are in
+LICENSES/rime-kaomoji-LGPL-3.0.txt and LICENSES/GPL-3.0.txt.

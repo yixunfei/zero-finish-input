@@ -98,6 +98,7 @@ tasks.register("privacyCheck") {
                     "android.permission.USE_BIOMETRIC",
                     "android.permission.USE_FINGERPRINT",
                     "android.permission.POST_NOTIFICATIONS",
+                    "android.permission.SYSTEM_ALERT_WINDOW",
                     "$packageName.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                 )
                 val permissionNames = buildSet {

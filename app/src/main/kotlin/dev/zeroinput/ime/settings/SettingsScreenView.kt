@@ -51,6 +51,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
     var onSecureClipboardChanged: (Boolean) -> Unit = {}
     var onHapticsChanged: (Boolean) -> Unit = {}
     var onDictionaryRequested: () -> Unit = {}
+    var onExpressionsRequested: () -> Unit = {}
     var onPersonalDataClearRequested: () -> Unit = {}
     var onSecureClipboardRequested: () -> Unit = {}
     var onClipboardGuardRequested: () -> Unit = {}
@@ -162,6 +163,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
 
         section(context.getString(R.string.section_data))
         command(context.getString(R.string.setting_user_phrases)) { onDictionaryRequested() }
+        command(context.getString(R.string.expression_manager_title)) { onExpressionsRequested() }
         command(context.getString(R.string.clear_personal_data)) { onPersonalDataClearRequested() }
         command(context.getString(R.string.secure_clipboard)) { onSecureClipboardRequested() }
 

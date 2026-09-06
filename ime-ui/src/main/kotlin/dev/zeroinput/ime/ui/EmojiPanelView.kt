@@ -2,136 +2,188 @@ package dev.zeroinput.ime.ui
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.appcompat.widget.AppCompatImageButton
+import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
+import kotlin.math.ceil
 
-class EmojiPanelView @JvmOverloads constructor(
-    context: Context,
-    attrs: AttributeSet? = null,
-) : LinearLayout(context, attrs) {
-    var onEmojiSelected: (String) -> Unit = {}
+class EmojiPanelView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : LinearLayout(context, attrs) {
+    var onEmojiSelected: (EmojiEntry) -> Unit = {}
+    var onFavoriteRequested: (EmojiEntry, Boolean) -> Unit = { _, _ -> }
+    var onManageRequested: (String?) -> Unit = {}
     var onSearchModeChanged: (Boolean) -> Unit = {}
     var onUserInteraction: () -> Unit = {}
 
-    var isSearchActive: Boolean = false
-        private set
-
-    private var query = ""
-    private var category = EmojiCategory.SMILEYS
-    private var recentEntries: List<EmojiEntry> = emptyList()
-    private val adapter = EmojiAdapter { onEmojiSelected(it) }
+    private val state = ExpressionBrowserState()
+    val isSearchActive: Boolean get() = state.searchActive
+    private val categoryButtons = linkedMapOf<EmojiCategory, MaterialButton>()
+    private val groupButtons = linkedMapOf<KaomojiGroup?, MaterialButton>()
+    private val adapter = EmojiAdapter({ onEmojiSelected(it) }, { entry, selected -> onFavoriteRequested(entry, selected) },
+        { onManageRequested(it) }, { onUserInteraction() })
     private val queryLabel = TextView(context).apply {
-        textSize = 15f
+        textSize = 14f
         gravity = Gravity.CENTER_VERTICAL
         maxLines = 1
-        layoutParams = LayoutParams(0, dp(40), 1f)
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        isSaveEnabled = false
+        layoutParams = LayoutParams(0, dp(48), 1f)
     }
-    private val gridLayout = GridLayoutManager(context, DEFAULT_COLUMNS)
+    private val searchButton = icon(R.drawable.ic_expression_search, R.string.expression_search) { toggleSearch() }
+    private val manageButton = icon(R.drawable.ic_expression_add, R.string.expression_manage) { onManageRequested(null) }
+    private val gridLayout = GridLayoutManager(context, 8)
     private val grid = RecyclerView(context).apply {
         layoutManager = gridLayout
         adapter = this@EmojiPanelView.adapter
-        overScrollMode = View.OVER_SCROLL_NEVER
         itemAnimator = null
-        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        overScrollMode = OVER_SCROLL_NEVER
+        isSaveEnabled = false
     }
+    private val emptyLabel = TextView(context).apply {
+        gravity = Gravity.CENTER
+        textSize = 14f
+        setPadding(dp(12), 0, dp(12), 0)
+    }
+    private val groups = createGroups()
 
     init {
         orientation = VERTICAL
+        isSaveEnabled = false
+        importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        if (android.os.Build.VERSION.SDK_INT >= 30) importantForContentCapture = IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
         addView(createSearchRow())
-        addView(grid)
-        addView(createCategoryRow())
+        addView(groups)
+        addView(FrameLayout(context).apply {
+            addView(grid, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            addView(emptyLabel, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(createCategories())
+        gridLayout.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+            private val paint = Paint().apply { textSize = 18 * resources.displayMetrics.scaledDensity }
+            override fun getSpanSize(position: Int): Int {
+                val entry = adapter.entry(position) ?: return 1
+                if (!entry.isWide) return 1
+                val cell = (grid.width / gridLayout.spanCount).coerceAtLeast(dp(48))
+                return ceil((paint.measureText(entry.value) + dp(40)) / cell).toInt()
+                    .coerceIn(minOf(3, gridLayout.spanCount), gridLayout.spanCount)
+            }
+        }
         refresh()
     }
 
-    fun setRecent(values: List<String>) {
-        recentEntries = EmojiCatalog.recent(values)
-        if (category == EmojiCategory.RECENT && recentEntries.isEmpty()) category = EmojiCategory.SMILEYS
+    fun renderPersonal(allowed: Boolean, data: PersonalExpressionsUi, recent: List<String>) {
+        state.renderPersonal(allowed, data, recent)
         refresh()
     }
 
-    fun appendQuery(value: String) {
-        if (!isSearchActive || query.length >= MAX_QUERY_LENGTH) return
-        query += value.lowercase()
+    fun clearSession() {
+        state.clearSession()
         refresh()
+        onSearchModeChanged(false)
     }
 
-    fun removeQueryCharacter() {
-        if (!isSearchActive || query.isEmpty()) return
-        query = query.dropLast(1)
-        refresh()
+    fun appendQuery(value: String) { state.append(value); refresh() }
+    fun removeQueryCharacter() { state.backspace(); refresh() }
+    fun clearQuery() { onUserInteraction(); state.clearQuery(); refresh() }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        gridLayout.spanCount = (w / dp(48)).coerceIn(1, 16)
     }
 
-    fun clearQuery() {
-        onUserInteraction()
-        query = ""
-        refresh()
-    }
-
-    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
-        super.onSizeChanged(width, height, oldWidth, oldHeight)
-        gridLayout.spanCount = (width / dp(48)).coerceIn(5, 10)
-    }
-
-    private fun createSearchRow(): View = LinearLayout(context).apply {
-        orientation = HORIZONTAL
+    private fun createSearchRow() = LinearLayout(context).apply {
         gravity = Gravity.CENTER_VERTICAL
-        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(48))
-        addView(iconButton("⌕", "搜索 emoji") { toggleSearch() })
+        addView(searchButton)
         addView(queryLabel)
-        addView(iconButton("×", "清除搜索") { clearQuery() })
+        addView(icon(R.drawable.ic_expression_close, R.string.expression_clear_search) { clearQuery() })
+        addView(manageButton)
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(48))
     }
 
-    private fun createCategoryRow(): View {
-        val row = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        EmojiCategory.entries.forEach { item ->
-            row.addView(iconButton(item.marker, item.description) {
-                onUserInteraction()
-                category = item
-                if (item == EmojiCategory.RECENT && recentEntries.isEmpty()) category = EmojiCategory.SMILEYS
+    private fun createCategories(): View {
+        val row = LinearLayout(context)
+        EmojiCategory.entries.forEach { category ->
+            val button = tab(category.marker, context.getString(category.label), compact = true) {
+                state.category = category
                 refresh()
-            })
+                grid.scrollToPosition(0)
+            }
+            categoryButtons[category] = button
+            row.addView(button)
         }
-        return HorizontalScrollView(context).apply {
-            isHorizontalScrollBarEnabled = false
-            addView(row)
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(48))
+        return scrolling(row)
+    }
+
+    private fun createGroups(): View {
+        val row = LinearLayout(context)
+        (listOf<KaomojiGroup?>(null) + KaomojiGroup.entries).forEach { group ->
+            val label = context.getString(group?.label ?: R.string.expression_all)
+            val button = tab(label, label, compact = false) {
+                state.group = group
+                refresh()
+                grid.scrollToPosition(0)
+            }
+            groupButtons[group] = button
+            row.addView(button)
         }
+        return scrolling(row)
+    }
+
+    private fun scrolling(row: View) = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        addView(row)
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(48))
     }
 
     private fun toggleSearch() {
-        onUserInteraction()
-        isSearchActive = !isSearchActive
-        if (!isSearchActive) query = ""
-        onSearchModeChanged(isSearchActive)
+        state.searchActive = !state.searchActive
+        if (!state.searchActive) state.clearQuery()
+        onSearchModeChanged(state.searchActive)
         refresh()
     }
 
     private fun refresh() {
-        queryLabel.text = if (isSearchActive) query.ifEmpty { "emoji" } else category.description
-        val values = when {
-            isSearchActive -> EmojiCatalog.search(query)
-            category == EmojiCategory.RECENT -> recentEntries
-            else -> EmojiCatalog.entries.filter { it.category == category }
-        }
-        adapter.submit(values)
+        queryLabel.text = if (state.searchActive) state.query.ifEmpty { context.getString(R.string.expression_search_hint) }
+            else context.getString(state.category.label)
+        searchButton.isSelected = state.searchActive
+        searchButton.contentDescription = context.getString(if (state.searchActive) R.string.expression_close_search else R.string.expression_search)
+        manageButton.isEnabled = state.personalizationAllowed
+        groups.visibility = if (state.category == EmojiCategory.KAOMOJI) VISIBLE else GONE
+        categoryButtons.forEach { (category, button) -> select(button, category == state.category) }
+        groupButtons.forEach { (group, button) -> select(button, group == state.group) }
+        val entries = state.visible()
+        adapter.submit(entries, state.personal.favorites, state.personalizationAllowed)
+        emptyLabel.visibility = if (entries.isEmpty()) VISIBLE else GONE
+        emptyLabel.setText(when {
+            !state.personalizationAllowed && state.category in setOf(EmojiCategory.RECENT, EmojiCategory.FAVORITES, EmojiCategory.CUSTOM) -> R.string.expression_private
+            state.searchActive && state.query.isNotEmpty() -> R.string.expression_no_results
+            state.category == EmojiCategory.FAVORITES -> R.string.expression_no_favorites
+            state.category == EmojiCategory.CUSTOM -> R.string.expression_no_custom
+            else -> R.string.expression_no_recent
+        })
     }
 
-    private fun iconButton(label: String, description: String, action: () -> Unit) = MaterialButton(context).apply {
+    private fun select(button: MaterialButton, selected: Boolean) {
+        button.isSelected = selected
+        button.setTextColor(color(if (selected) com.google.android.material.R.attr.colorPrimary else com.google.android.material.R.attr.colorOnSurface))
+        button.setBackgroundColor(if (selected) color(com.google.android.material.R.attr.colorPrimaryContainer) else Color.TRANSPARENT)
+    }
+
+    private fun tab(label: String, description: String, compact: Boolean, action: () -> Unit) = MaterialButton(context).apply {
         text = label
         contentDescription = description
-        textSize = 19f
+        tooltipText = description
+        textSize = if (compact) 17f else 14f
         letterSpacing = 0f
-        setTextColor(resolveColor(com.google.android.material.R.attr.colorOnSurface, Color.BLACK))
         isAllCaps = false
         minWidth = 0
         minimumWidth = 0
@@ -139,22 +191,28 @@ class EmojiPanelView @JvmOverloads constructor(
         minimumHeight = 0
         insetTop = 0
         insetBottom = 0
-        setPadding(0, 0, 0, 0)
+        cornerRadius = 0
+        elevation = 0f
+        stateListAnimator = null
+        setPadding(if (compact) 0 else dp(12), 0, if (compact) 0 else dp(12), 0)
         setSingleLine()
+        layoutParams = LayoutParams(if (compact) dp(48) else LayoutParams.WRAP_CONTENT, dp(48))
+        setOnClickListener { onUserInteraction(); action() }
+    }
+
+    private fun icon(drawable: Int, label: Int, action: () -> Unit) = AppCompatImageButton(context).apply {
+        setImageResource(drawable)
+        contentDescription = context.getString(label)
+        tooltipText = contentDescription
+        imageTintList = android.content.res.ColorStateList.valueOf(color(com.google.android.material.R.attr.colorOnSurface))
         setBackgroundColor(Color.TRANSPARENT)
+        setPadding(dp(12), dp(12), dp(12), dp(12))
         layoutParams = LayoutParams(dp(48), dp(48))
-        setOnClickListener { action() }
+        setOnClickListener { onUserInteraction(); action() }
     }
 
-    private fun resolveColor(attribute: Int, fallback: Int): Int {
-        val values = context.obtainStyledAttributes(intArrayOf(attribute))
-        return values.getColor(0, fallback).also { values.recycle() }
+    private fun color(attribute: Int): Int = context.obtainStyledAttributes(intArrayOf(attribute)).let {
+        try { it.getColor(0, Color.BLACK) } finally { it.recycle() }
     }
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private companion object {
-        const val DEFAULT_COLUMNS = 8
-        const val MAX_QUERY_LENGTH = 32
-    }
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }

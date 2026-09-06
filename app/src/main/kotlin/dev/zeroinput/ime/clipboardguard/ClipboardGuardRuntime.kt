@@ -29,9 +29,11 @@ internal class ClipboardGuardRuntime(
     private val refreshQueued = AtomicBoolean()
     private val eventQueued = AtomicBoolean()
     private val clearQueued = AtomicBoolean()
+    private val inspectQueued = AtomicBoolean()
     private val closed = AtomicBoolean()
     private val listeners = CopyOnWriteArrayList<(ClipboardGuardState) -> Unit>()
     private val notifications = ClipboardGuardNotifications(context)
+    private val overlay = ClipboardGuardOverlay(context) { state }
     @Volatile private var options = ClipboardGuardOptions()
     @Volatile var state = ClipboardGuardState(options)
         private set
@@ -64,6 +66,37 @@ internal class ClipboardGuardRuntime(
         return AutoCloseable { listeners -= listener }
     }
 
+    fun retryMonitoring() { reconfigure() }
+
+    fun previewOverlay(result: (Boolean) -> Unit) { main.post { result(overlay.preview(options)) } }
+
+    fun inspectCurrent(isActive: () -> Boolean, result: (ClipboardGuardState) -> Unit) {
+        if (closed.get() || !inspectQueued.compareAndSet(false, true)) {
+            main.post { result(state.copy(ticket = null)) }
+            return
+        }
+        val expected = revision.get()
+        val accepted = enqueue {
+            try {
+                if (expected != revision.get() || !mayAccess() || !isActive()) {
+                    main.post { result(state.copy(ticket = null)) }
+                } else {
+                    val policy = session ?: newSession().also { session = it; it.start(options) }
+                    val next = policy.inspectCurrent(isActive)
+                    if (expected == revision.get() && isActive()) publish(next, announce = false)
+                    main.post { result(if (expected == revision.get() && isActive()) next else next.copy(ticket = null)) }
+                }
+            } catch (failure: RuntimeException) {
+                main.post { result(state.copy(status = ClipboardGuardStatus.FAILED, ticket = null, accessIssue = null)) }
+                throw failure
+            } finally { inspectQueued.set(false) }
+        }
+        if (!accepted) {
+            inspectQueued.set(false)
+            main.post { result(state.copy(status = ClipboardGuardStatus.FAILED, ticket = null)) }
+        }
+    }
+
     fun clear(id: String, grant: AuthenticationGrant?, isActive: () -> Boolean, result: (ClipboardClearResult) -> Unit) {
         if (closed.get() || !clearQueued.compareAndSet(false, true)) {
             main.post { result(ClipboardClearResult.EXPIRED) }
@@ -92,6 +125,7 @@ internal class ClipboardGuardRuntime(
     private fun reconfigure() {
         if (closed.get()) return
         revision.incrementAndGet()
+        main.post { overlay.hide() }
         if (!refreshQueued.compareAndSet(false, true)) return
         if (!enqueue {
             refreshQueued.set(false)
@@ -108,8 +142,8 @@ internal class ClipboardGuardRuntime(
         val current = preferences.options
         if (lease != revision.get()) return
         options = current
-        if (closed.get() || !imeAttached.get() || !current.listening) {
-            publish(ClipboardGuardState(current, if (current.listening) ClipboardGuardStatus.UNAVAILABLE else ClipboardGuardStatus.OFF))
+        if (closed.get() || !current.listening) {
+            publish(ClipboardGuardState(current))
             return
         }
         context.contentResolver.registerContentObserver(
@@ -117,16 +151,19 @@ internal class ClipboardGuardRuntime(
         )
         observingDefaultIme = true
         if (!isDefaultIme()) {
+            publish(ClipboardGuardState(current, ClipboardGuardStatus.NOT_DEFAULT))
+            return
+        }
+        if (!imeAttached.get()) {
             publish(ClipboardGuardState(current, ClipboardGuardStatus.UNAVAILABLE))
             return
         }
-        val port = clipboard ?: createClipboard().also { clipboard = it }
-        val policy = ClipboardGuardSession(port, ::mayAccess) { UUID.randomUUID().toString() }
+        val policy = newSession()
         session = policy
         policy.start(current)
         if (policy.state.status == ClipboardGuardStatus.WAITING && mayAccess()) {
             val registeredRevision = lease
-            registration = port.listen { queueEvent(registeredRevision) }
+            registration = checkNotNull(clipboard).listen { queueEvent(registeredRevision) }
             // Recheck after registration to cover a change between baseline and subscription.
             policy.changed()
         }
@@ -147,20 +184,30 @@ internal class ClipboardGuardRuntime(
         }) eventQueued.set(false)
     }
 
-    private fun mayAccess(): Boolean = imeAttached.get() && options.listening && lease == revision.get() && isDefaultIme()
+    private fun newSession(): ClipboardGuardSession {
+        val port = clipboard ?: createClipboard().also { clipboard = it }
+        return ClipboardGuardSession(port, ::mayAccess) { UUID.randomUUID().toString() }
+    }
 
-    private fun publish(next: ClipboardGuardState) {
+    private fun mayAccess(): Boolean = options.listening && lease == revision.get() && isDefaultIme()
+
+    private fun publish(next: ClipboardGuardState, announce: Boolean = true) {
         val expected = lease
         if (closed.get() || next.options != options || expected != revision.get()) return
         if (next.ticket != null && !mayAccess()) return
         val previous = state
         state = next
         if (next != previous) {
-            if (next.status in setOf(ClipboardGuardStatus.CHANGED, ClipboardGuardStatus.CLEARED, ClipboardGuardStatus.FAILED)) {
+            if (announce && next.status in setOf(ClipboardGuardStatus.CHANGED, ClipboardGuardStatus.CLEARED, ClipboardGuardStatus.BLOCKED, ClipboardGuardStatus.FAILED)) {
                 notifications.show(next)
             } else notifications.cancel()
         }
-        main.post { if (!closed.get() && expected == revision.get() && state == next) listeners.forEach { it(next) } }
+        main.post {
+            if (!closed.get() && expected == revision.get() && state == next) {
+                overlay.render(next, announce)
+                listeners.forEach { it(next) }
+            }
+        }
     }
 
     private fun detachPlatform() {
@@ -195,6 +242,7 @@ internal class ClipboardGuardRuntime(
         revision.incrementAndGet()
         settingsObserver.close()
         listeners.clear()
+        main.post { overlay.close() }
         enqueue { detachPlatform(); notifications.cancel() }
         worker.shutdown()
     }

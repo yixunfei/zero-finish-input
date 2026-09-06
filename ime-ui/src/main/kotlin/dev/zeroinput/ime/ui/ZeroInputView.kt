@@ -28,7 +28,9 @@ class ZeroInputView @JvmOverloads constructor(
     var onKeyboardAction: (KeyboardAction) -> Unit = {}
     var onCandidateSelected: (Int) -> Unit = {}
     var onCandidatePageChanged: (PageDirection) -> Unit = {}
-    var onEmojiSelected: (String) -> Unit = {}
+    var onEmojiSelected: (EmojiEntry) -> Unit = {}
+    var onExpressionFavoriteRequested: (EmojiEntry, Boolean) -> Unit = { _, _ -> }
+    var onExpressionManagementRequested: (String?) -> Unit = {}
     var onSecureClipboardSelected: (String) -> Unit = {}
     var onSettingsRequested: () -> Unit = {}
     var onClipboardGuardRequested: () -> Unit = {}
@@ -162,9 +164,11 @@ class ZeroInputView @JvmOverloads constructor(
 
     fun cancelPendingGestures() { keyboard.cancelPendingGestures() }
 
-    fun renderRecentEmoji(values: List<String>) {
-        emoji.setRecent(values)
+    fun renderExpressions(allowed: Boolean, data: PersonalExpressionsUi, recent: List<String>) {
+        emoji.renderPersonal(allowed, data, recent)
     }
+
+    fun clearExpressionSession() { emoji.clearSession() }
 
     fun renderSecureClipboard(enabled: Boolean, items: List<SecureClipboardItemUi>) {
         secureClipboard.render(enabled, items)
@@ -181,7 +185,7 @@ class ZeroInputView @JvmOverloads constructor(
         addView(languageButton)
         addView(scriptButton)
         addView(layoutButton)
-        addView(toolbarButton("☺", "emoji") { toggleMode(PanelMode.EMOJI) })
+        addView(toolbarButton("☺", context.getString(R.string.expression_smileys)) { toggleMode(PanelMode.EMOJI) })
         addView(toolbarButton("🔒", "安全剪贴板") { toggleMode(PanelMode.SECURE_CLIPBOARD) })
         addView(Space(context).apply { layoutParams = LayoutParams(0, 1, 1f) })
         // The return control replaces the layout switch while a secondary panel is open.
@@ -208,6 +212,8 @@ class ZeroInputView @JvmOverloads constructor(
         expandedCandidates.onCandidateSelected = { onCandidateSelected(it) }
         expandedCandidates.onPageChanged = { onCandidatePageChanged(it) }
         emoji.onEmojiSelected = { onEmojiSelected(it) }
+        emoji.onFavoriteRequested = { entry, selected -> onExpressionFavoriteRequested(entry, selected) }
+        emoji.onManageRequested = { onExpressionManagementRequested(it) }
         emoji.onSearchModeChanged = { searchActive -> updateEmojiSearchLayout(searchActive) }
         emoji.onUserInteraction = { onUserInteraction() }
         secureClipboard.onItemSelected = { onSecureClipboardSelected(it) }
@@ -285,14 +291,16 @@ class ZeroInputView @JvmOverloads constructor(
 
     private fun updatePanelLayout() {
         val searchActive = mode == PanelMode.EMOJI && emoji.isSearchActive
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val panelHeight = if (landscape) EMOJI_SEARCH_HEIGHT_DP else EMOJI_PANEL_HEIGHT_DP
         val splitSearch = searchActive &&
             resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
             resources.configuration.screenWidthDp >= 600
         content.orientation = if (splitSearch) HORIZONTAL else VERTICAL
         emoji.layoutParams = when {
-            splitSearch -> LayoutParams(0, dp(EMOJI_PANEL_HEIGHT_DP), 1f)
+            splitSearch -> LayoutParams(0, dp(panelHeight), 1f)
             searchActive -> LayoutParams(LayoutParams.MATCH_PARENT, dp(EMOJI_SEARCH_HEIGHT_DP))
-            else -> LayoutParams(LayoutParams.MATCH_PARENT, dp(EMOJI_PANEL_HEIGHT_DP))
+            else -> LayoutParams(LayoutParams.MATCH_PARENT, dp(panelHeight))
         }
         keyboardContainer.layoutParams = if (splitSearch) {
             LayoutParams(0, LayoutParams.WRAP_CONTENT, 2f)
@@ -319,6 +327,8 @@ class ZeroInputView @JvmOverloads constructor(
         setPadding(0, 0, 0, 0)
         setSingleLine()
         setBackgroundColor(Color.TRANSPARENT)
+        elevation = 0f
+        stateListAnimator = null
         layoutParams = LayoutParams(dp(48), dp(48))
         setOnClickListener { action() }
         setOnLongClickListener {
@@ -344,6 +354,6 @@ class ZeroInputView @JvmOverloads constructor(
     private companion object {
         const val PANEL_HEIGHT_DP = 260
         const val EMOJI_PANEL_HEIGHT_DP = 260
-        const val EMOJI_SEARCH_HEIGHT_DP = 150
+        const val EMOJI_SEARCH_HEIGHT_DP = 224
     }
 }

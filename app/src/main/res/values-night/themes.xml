@@ -30,7 +30,12 @@
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
 
-    <style name="Theme.ZeroInput.InputMethod" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.ZeroInput.InputMethod" parent="Base.Theme.ZeroInput.InputMethod" />
+
+    <style name="Base.Theme.ZeroInput.InputMethod" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
         <item name="colorPrimaryContainer">@color/zero_primary_container</item>
         <item name="colorSecondaryContainer">@color/zero_secondary_container</item>
         <item name="colorPrimary">@color/zero_primary</item>

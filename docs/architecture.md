@@ -93,7 +93,10 @@ never run on the input thread; settings are read as one atomic value snapshot.
 Preferences, default-IME changes and service detachment invalidate the worker's
 lease before queued destructive operations can run. Event and refresh wake-ups
 are coalesced; clear submissions are bounded to one. Subscription startup records
-only a baseline and ignores existing content. Runtime tests inject a synthetic
+only a baseline and ignores existing content. A foreground inspection command can
+create a confirmation ticket for an existing item, even if no callback arrived.
+That ticket permits explicit cleanup in the otherwise observation-only mode;
+inspection itself never triggers automatic clearing. Runtime tests inject a synthetic
 metadata port and default-IME predicate without accessing the platform clipboard.
 
 The nonexported settings and clear Activities expose separate reminder, cleanup
@@ -103,6 +106,38 @@ Authentication uses the existing one-use grant with a distinct allowlisted title
 successful authentication still requires foreground confirmation. This adds no
 encrypted format, persisted ticket, secret cache, polling or background service.
 See [ADR 0007](adr/0007-system-clipboard-guard.md) for public-API limitations.
+
+`ClipboardGuardOverlay` owns one application overlay on the main thread, separate
+from the metadata worker. It holds generic status and opaque event identity only.
+Settings own permission education and opt-in; granting SYSTEM_ALERT_WINDOW does
+not enable clipboard access or any background service. Activity lifecycle,
+screen-off and permission revocation callbacks remove the window. Overlay taps
+open the existing nonexported confirmation flow. Position and bounded duration
+are independent preferences. See [ADR 0008](adr/0008-clipboard-overlay.md).
+
+## Expressions
+
+`ime-ui` owns the immutable public emoji/kaomoji catalog, bounded keyword search,
+kaomoji subtags and presentation models. It performs no file I/O. The new
+`app/expressions` management surface maps user-data models to UI values;
+`ZeroInputService` gates personal reads and selections with the current editor,
+privacy generation and library revision. UI-only interactions reevaluate privacy.
+Retired adapter bindings clear text and cannot finish an earlier touch gesture.
+
+`PersonalExpressionRepository` serializes favorites/custom edits through the
+existing encrypted store port, with a separate Keystore alias and a bounded
+versioned binary format. There is no repository plaintext cache. Only the visible
+management page or active permitted IME holds personal display snapshots.
+`EmojiHistoryRepository` retains JSON format 1 and its dedicated key, extends
+valid text length to 128 UTF-16 units, and checks strict decoding, cancellation
+and deletion generation. Failed writes do not publish unsaved history. See
+[ADR 0009](adr/0009-personal-expressions.md).
+
+The IME window uses an explicit transparent, nondimming base theme in all resource
+variants. Android fullscreen extraction stays disabled. In landscape, the
+composition/status area and candidates share a 48dp row, keyboard rows use 48dp
+touch targets and the expression panel uses 224dp. This leaves the host editor
+visible without stretching the input view to the application window.
 
 ## User lexicon persistence and transfer
 
