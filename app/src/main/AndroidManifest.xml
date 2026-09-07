@@ -33,6 +33,11 @@
         </activity>
 
         <activity
+            android:name=".settings.KeyboardAppearanceActivity"
+            android:exported="false"
+            android:parentActivityName=".settings.MainActivity" />
+
+        <activity
             android:name=".settings.UserDictionaryActivity"
             android:exported="false"
             android:parentActivityName=".settings.MainActivity"

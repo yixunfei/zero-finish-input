@@ -11,13 +11,18 @@ import android.widget.EditText
 class InputFixtureActivity : Activity() {
     lateinit var editor: EditText
         private set
+    val editorActions = mutableListOf<Int>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(null)
         editor = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            inputType = intent.getIntExtra("input_type", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+            imeOptions = intent.getIntExtra("ime_options", 0) or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
             isSaveEnabled = false
+            setOnEditorActionListener { _, action, _ ->
+                editorActions += action
+                action != EditorInfo.IME_NULL
+            }
         }
         setContentView(editor)
         if (intent.getBooleanExtra("fullscreen_fixture", false)) {

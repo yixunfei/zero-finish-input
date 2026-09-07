@@ -395,8 +395,7 @@ class InputSessionController(
 
     private fun performEnterAction() {
         val action = editorInfo.imeOptions and EditorInfo.IME_MASK_ACTION
-        val handled = action != EditorInfo.IME_ACTION_NONE &&
-            action != EditorInfo.IME_ACTION_UNSPECIFIED &&
+        val handled = EditorInputOptions.enterAction(editorInfo) != EnterAction.NEW_LINE &&
             connection.performEditorAction(action)
         if (!handled) connection.sendEnterKey()
     }

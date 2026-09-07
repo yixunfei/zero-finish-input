@@ -67,4 +67,25 @@
     <string name="expression_no_favorites">暂无收藏</string>
     <string name="expression_no_custom">暂无自定义颜文字</string>
     <string name="expression_no_recent">暂无最近记录</string>
+    <string name="keyboard_theme_classic">经典</string>
+    <string name="keyboard_theme_gray">极简灰</string>
+    <string name="keyboard_theme_mint">薄荷绿</string>
+    <string name="keyboard_theme_rose">樱花粉</string>
+    <string name="keyboard_height_compact">紧凑</string>
+    <string name="keyboard_height_standard">标准</string>
+    <string name="keyboard_height_comfortable">舒适</string>
+    <string name="keyboard_tools">键盘工具</string>
+    <string name="keyboard_return">返回键盘</string>
+    <string name="key_shift">切换大写</string>
+    <string name="key_caps_lock">锁定大写</string>
+    <string name="key_lowercase">小写</string>
+    <string name="key_uppercase">单次大写</string>
+    <string name="key_more_symbols">更多符号</string>
+    <string name="key_letters">字母键盘</string>
+    <string name="key_go">前往</string>
+    <string name="key_search">搜索</string>
+    <string name="key_send">发送</string>
+    <string name="key_next">下一项</string>
+    <string name="key_done">完成</string>
+    <string name="key_previous">上一项</string>
 </resources>

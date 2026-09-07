@@ -2,15 +2,17 @@ package dev.zeroinput.ime.ui
 
 import android.content.Context
 import android.view.ViewGroup
+import android.util.AttributeSet
 
 /** Cumulative pixel boundaries ensure fractional key weights leave no untouchable pixels. */
-internal class KeyboardRow(context: Context, private val weights: List<Float>) : ViewGroup(context) {
+internal class KeyboardRow @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : ViewGroup(context, attrs) {
+    var weights: List<Float> = emptyList()
     init { isMotionEventSplittingEnabled = true }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val height = MeasureSpec.getSize(heightMeasureSpec)
-        val total = weights.sumOf(Float::toDouble)
+        val total = weights.sumOf(Float::toDouble).coerceAtLeast(1.0)
         var accumulated = 0.0
         var left = 0
         for (index in 0 until childCount) {

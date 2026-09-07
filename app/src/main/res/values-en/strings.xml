@@ -171,4 +171,8 @@
         <item quantity="other">%1$d kaomoji</item>
     </plurals>
     <string name="expression_delete_message">Permanently delete this kaomoji and its favorite status?</string>
+    <string name="keyboard_appearance">Keyboard appearance</string>
+    <string name="keyboard_style">Built-in styles</string>
+    <string name="keyboard_height">Keyboard height</string>
+    <string name="keyboard_preview">Preview</string>
 </resources>

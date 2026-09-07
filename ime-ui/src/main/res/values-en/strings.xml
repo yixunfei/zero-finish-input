@@ -67,4 +67,25 @@
     <string name="expression_no_favorites">No favorites</string>
     <string name="expression_no_custom">No custom kaomoji</string>
     <string name="expression_no_recent">No recent expressions</string>
+    <string name="keyboard_theme_classic">Classic</string>
+    <string name="keyboard_theme_gray">Minimal gray</string>
+    <string name="keyboard_theme_mint">Mint</string>
+    <string name="keyboard_theme_rose">Rose</string>
+    <string name="keyboard_height_compact">Compact</string>
+    <string name="keyboard_height_standard">Standard</string>
+    <string name="keyboard_height_comfortable">Roomy</string>
+    <string name="keyboard_tools">Keyboard tools</string>
+    <string name="keyboard_return">Return to keyboard</string>
+    <string name="key_shift">Shift</string>
+    <string name="key_caps_lock">Caps lock</string>
+    <string name="key_lowercase">Lowercase</string>
+    <string name="key_uppercase">Uppercase</string>
+    <string name="key_more_symbols">More symbols</string>
+    <string name="key_letters">Letters</string>
+    <string name="key_go">Go</string>
+    <string name="key_search">Search</string>
+    <string name="key_send">Send</string>
+    <string name="key_next">Next</string>
+    <string name="key_done">Done</string>
+    <string name="key_previous">Prev</string>
 </resources>

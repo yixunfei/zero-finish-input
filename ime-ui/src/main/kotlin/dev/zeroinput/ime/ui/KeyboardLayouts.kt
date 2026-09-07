@@ -17,56 +17,57 @@ internal object KeyboardLayouts {
 
     private fun digit(label: String, code: String) = KeySpec(label, label, KeyboardAction.Text(code))
 
-    fun letters(shifted: Boolean, languageLabel: String): List<List<KeySpec>> {
+    fun letters(context: android.content.Context, shifted: Boolean, languageLabel: String): List<List<KeySpec>> {
         val rows = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
         return listOf(
             characterRow(rows[0], shifted),
             characterRow(rows[1], shifted),
             listOf(
-                KeySpec("⇧", "切换大写", KeyboardAction.Shift, 1.35f, KeyStyle.MODIFIER),
+                KeySpec("⇧", context.getString(R.string.key_shift), KeyboardAction.Shift, 1.35f, KeyStyle.MODIFIER),
             ) + characterRow(rows[2], shifted) + listOf(
-                KeySpec("⌫", "退格", KeyboardAction.Backspace, 1.35f, KeyStyle.MODIFIER),
+                KeySpec("⌫", context.getString(R.string.key_backspace), KeyboardAction.Backspace, 1.35f, KeyStyle.MODIFIER),
             ),
             listOf(
-                KeySpec("?123", "符号键盘", KeyboardAction.ShowSymbols, 1.35f, KeyStyle.MODIFIER),
-                KeySpec(languageLabel, "切换中英文", KeyboardAction.SwitchLanguage, 1.1f, KeyStyle.MODIFIER),
-                KeySpec("，", "逗号", KeyboardAction.Text(","), 0.9f),
-                KeySpec("空格", "空格", KeyboardAction.Space, 3.8f),
-                KeySpec("。", "句号", KeyboardAction.Text("."), 0.9f),
-                KeySpec("↵", "回车", KeyboardAction.Enter, 1.35f, KeyStyle.PRIMARY),
+                KeySpec("?123", context.getString(R.string.key_symbols), KeyboardAction.ShowSymbols, 1.35f, KeyStyle.MODIFIER),
+                KeySpec(languageLabel, context.getString(R.string.key_language), KeyboardAction.SwitchLanguage, 1.1f, KeyStyle.MODIFIER),
+                KeySpec(if (languageLabel == "En") "," else "，", context.getString(R.string.key_comma), KeyboardAction.Text(","), 0.9f),
+                KeySpec(context.getString(R.string.key_space), context.getString(R.string.key_space), KeyboardAction.Space, 3.8f),
+                KeySpec(if (languageLabel == "En") "." else "。", context.getString(R.string.key_period), KeyboardAction.Text("."), 0.9f),
+                KeySpec("↵", context.getString(R.string.key_enter), KeyboardAction.Enter, 1.35f, KeyStyle.PRIMARY),
             ),
         )
     }
 
-    fun symbols(languageLabel: String): List<List<KeySpec>> = listOf(
+    fun symbols(context: android.content.Context, languageLabel: String): List<List<KeySpec>> = listOf(
         symbolRow("1234567890"),
         listOf("@", "#", "¥", "_", "&", "-", "+", "(", ")", "/").map(::symbolKey),
         listOf(
-            KeySpec("#+=", "更多符号", KeyboardAction.ShowMoreSymbols, 1.2f, KeyStyle.MODIFIER),
+            KeySpec("#+=", context.getString(R.string.key_more_symbols), KeyboardAction.ShowMoreSymbols, 1.2f, KeyStyle.MODIFIER),
         ) + listOf("*", "\"", "'", ":", ";", "!", "?").map(::symbolKey) + listOf(
-            KeySpec("⌫", "退格", KeyboardAction.Backspace, 1.2f, KeyStyle.MODIFIER),
+            KeySpec("⌫", context.getString(R.string.key_backspace), KeyboardAction.Backspace, 1.2f, KeyStyle.MODIFIER),
         ),
         listOf(
-            KeySpec("ABC", "字母键盘", KeyboardAction.ShowLetters, 1.35f, KeyStyle.MODIFIER),
-            KeySpec(languageLabel, "切换中英文", KeyboardAction.SwitchLanguage, 1.1f, KeyStyle.MODIFIER),
-            KeySpec(",", "逗号", KeyboardAction.Text(","), 0.9f),
-            KeySpec("空格", "空格", KeyboardAction.Space, 3.8f),
-            KeySpec(".", "句号", KeyboardAction.Text("."), 0.9f),
-            KeySpec("↵", "回车", KeyboardAction.Enter, 1.35f, KeyStyle.PRIMARY),
+            KeySpec("ABC", context.getString(R.string.key_letters), KeyboardAction.ShowLetters, 1.35f, KeyStyle.MODIFIER),
+            KeySpec(languageLabel, context.getString(R.string.key_language), KeyboardAction.SwitchLanguage, 1.1f, KeyStyle.MODIFIER),
+            KeySpec(",", context.getString(R.string.key_comma), KeyboardAction.Text(","), 0.9f),
+            KeySpec(context.getString(R.string.key_space), context.getString(R.string.key_space), KeyboardAction.Space, 3.8f),
+            KeySpec(".", context.getString(R.string.key_period), KeyboardAction.Text("."), 0.9f),
+            KeySpec("↵", context.getString(R.string.key_enter), KeyboardAction.Enter, 1.35f, KeyStyle.PRIMARY),
         ),
     )
 
-    fun moreSymbols(languageLabel: String): List<List<KeySpec>> = listOf(
-        symbolRow("[]{}<>|\\"),
+    fun moreSymbols(context: android.content.Context, languageLabel: String): List<List<KeySpec>> = listOf(
+        listOf(KeySpec("123", context.getString(R.string.key_symbols), KeyboardAction.ShowSymbols, style = KeyStyle.MODIFIER)) + symbolRow("[]{}<>|\\"),
         symbolRow("~^%*=\""),
-        listOf("€", "£", "$", "¢", "©", "®", "°", "…").map(::symbolKey),
+        listOf("€", "£", "$", "¢", "©", "®", "°", "…").map(::symbolKey) +
+            KeySpec("⌫", context.getString(R.string.key_backspace), KeyboardAction.Backspace, 1.2f, KeyStyle.MODIFIER),
         listOf(
-            KeySpec("123", "基础符号", KeyboardAction.ShowSymbols, 1.35f, KeyStyle.MODIFIER),
-            KeySpec(languageLabel, "切换中英文", KeyboardAction.SwitchLanguage, 1.1f, KeyStyle.MODIFIER),
-            KeySpec(",", "逗号", KeyboardAction.Text(","), 0.9f),
-            KeySpec("空格", "空格", KeyboardAction.Space, 3.8f),
-            KeySpec(".", "句号", KeyboardAction.Text("."), 0.9f),
-            KeySpec("↵", "回车", KeyboardAction.Enter, 1.35f, KeyStyle.PRIMARY),
+            KeySpec("ABC", context.getString(R.string.key_letters), KeyboardAction.ShowLetters, 1.35f, KeyStyle.MODIFIER),
+            KeySpec(languageLabel, context.getString(R.string.key_language), KeyboardAction.SwitchLanguage, 1.1f, KeyStyle.MODIFIER),
+            KeySpec(",", context.getString(R.string.key_comma), KeyboardAction.Text(","), 0.9f),
+            KeySpec(context.getString(R.string.key_space), context.getString(R.string.key_space), KeyboardAction.Space, 3.8f),
+            KeySpec(".", context.getString(R.string.key_period), KeyboardAction.Text("."), 0.9f),
+            KeySpec("↵", context.getString(R.string.key_enter), KeyboardAction.Enter, 1.35f, KeyStyle.PRIMARY),
         ),
     )
 

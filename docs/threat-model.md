@@ -232,6 +232,18 @@
   bundled and hash-checked during the build. Keystore fault, cancellation,
   clear/write race and privacy-revocation tests use constructed public fixtures.
 
+## Keyboard appearance and editor layout
+
+Keyboard appearance settings contain only built-in theme/height identifiers. The
+nonexported preview Activity has no input connection, engine or personal-data
+callbacks. Replacing a keyboard releases old UI callbacks, candidates, queries
+and personal display bindings. Appearance changes use the existing settings
+invalidation for pending authentication and personalization writes. Numeric
+layout selection uses public EditorInfo flags and does not relax the conservative
+privacy policy for passwords, PIN or unknown editor variants. Rendering fixtures
+are nonexported Debug components; screenshots contain only constructed public
+content. No new permission, network dependency or personal-data format is added.
+
 ## Out of scope
 
 - The initial v0.1.0 prerelease APK is debug-signed and debuggable. Authorized ADB

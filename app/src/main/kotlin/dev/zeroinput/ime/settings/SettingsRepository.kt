@@ -6,6 +6,9 @@ import dev.zeroinput.engine.api.ChineseInputOptions
 import dev.zeroinput.engine.api.ChineseScript
 import dev.zeroinput.engine.api.ChineseKeyboardLayout
 import dev.zeroinput.ime.core.privacy.PrivacyConfiguration
+import dev.zeroinput.ime.ui.KeyboardAppearance
+import dev.zeroinput.ime.ui.KeyboardTheme
+import dev.zeroinput.ime.ui.KeyboardHeight
 
 class SettingsRepository(context: Context) {
     private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
@@ -42,6 +45,13 @@ class SettingsRepository(context: Context) {
     var hapticFeedbackEnabled: Boolean
         get() = preferences.getBoolean(KEY_HAPTICS, true)
         set(value) = edit(KEY_HAPTICS, value)
+
+    var keyboardAppearance: KeyboardAppearance
+        get() = KeyboardAppearance(
+            KeyboardTheme.entries.firstOrNull { it.name == preferences.getString(KEY_THEME, null) } ?: KeyboardTheme.CLASSIC,
+            KeyboardHeight.entries.firstOrNull { it.name == preferences.getString(KEY_HEIGHT, null) } ?: KeyboardHeight.STANDARD,
+        )
+        set(value) { preferences.edit().putString(KEY_THEME, value.theme.name).putString(KEY_HEIGHT, value.height.name).apply() }
 
     var lastLanguage: InputLanguage
         get() = runCatching {
@@ -97,6 +107,8 @@ class SettingsRepository(context: Context) {
         const val KEY_INCOGNITO = "privacy.incognito"
         const val KEY_SECURE_CLIPBOARD = "secure-clipboard.enabled"
         const val KEY_HAPTICS = "keyboard.haptics"
+        const val KEY_THEME = "keyboard.theme"
+        const val KEY_HEIGHT = "keyboard.height"
         const val KEY_LANGUAGE = "keyboard.language"
         const val KEY_LANGUAGE_PACK = "keyboard.language-pack"
         const val KEY_SIMPLIFIED = "chinese.simplified"

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="keyboard_gray_primary">#CADBED</color>
+    <color name="keyboard_gray_accent">#374959</color>
+    <color name="keyboard_gray_surface">#191B1E</color>
+    <color name="keyboard_gray_text">#EEF0F3</color>
+    <color name="keyboard_gray_modifier">#2C3035</color>
+    <color name="keyboard_gray_outline">#50565D</color>
+    <color name="keyboard_mint_primary">#83DDC5</color>
+    <color name="keyboard_mint_accent">#215D50</color>
+    <color name="keyboard_mint_secondary">#634236</color>
+    <color name="keyboard_mint_surface">#172521</color>
+    <color name="keyboard_mint_text">#E3F2EB</color>
+    <color name="keyboard_mint_modifier">#2B4139</color>
+    <color name="keyboard_mint_outline">#526D62</color>
+    <color name="keyboard_rose_primary">#F2ADC1</color>
+    <color name="keyboard_rose_accent">#773C50</color>
+    <color name="keyboard_rose_secondary">#34574F</color>
+    <color name="keyboard_rose_surface">#291D22</color>
+    <color name="keyboard_rose_text">#FBE9EE</color>
+    <color name="keyboard_rose_modifier">#48333C</color>
+    <color name="keyboard_rose_outline">#795864</color>
+</resources>

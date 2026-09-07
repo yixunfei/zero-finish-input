@@ -51,6 +51,7 @@ class ZeroInputService : InputMethodService() {
 
     private var inputView: ZeroInputView? = null
     private var inputViewActive = false
+    private var currentAppearance: dev.zeroinput.ime.ui.KeyboardAppearance? = null
     private var controller: InputSessionController? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val secureClipboardExecutor = BoundedExecutors.singleThread(
@@ -175,6 +176,7 @@ class ZeroInputService : InputMethodService() {
                 // can never outlive the configuration under which it began.
                 registerInteraction()
                 inputView?.cancelPendingGestures()
+                refreshKeyboardAppearance()
                 val session = activeSession
                 if (session != null) {
                     syncSessionPrivacy()
@@ -216,13 +218,24 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onCreateInputView(): View {
-        val view = ZeroInputView(this)
+        inputView?.release()
+        val appearance = graph.settings.keyboardAppearance
+        val view = ZeroInputView(dev.zeroinput.ime.settings.KeyboardThemeContext.create(this, appearance.theme))
+        currentAppearance = appearance
+        view.setKeyboardHeight(appearance.height)
+        currentInputEditorInfo?.let { view.startEditor(dev.zeroinput.ime.core.EditorInputOptions.from(it)) }
         inputView = view
         bindView(view)
         renderLocalPanels(view)
         controller?.state?.let(view::renderSession)
         renderEngineStatus()
         return view
+    }
+
+    private fun refreshKeyboardAppearance() {
+        if (inputView == null || currentAppearance == graph.settings.keyboardAppearance) return
+        setInputView(onCreateInputView())
+        updateNavigationBarAppearance()
     }
 
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
@@ -265,6 +278,7 @@ class ZeroInputService : InputMethodService() {
         val session = InputSession(token, newController, connectionBinding, attribute.packageName)
         activeSession = session
         controller = newController
+        inputView?.startEditor(dev.zeroinput.ime.core.EditorInputOptions.from(attribute))
         newController.start(
             editorInfo = attribute,
             initialLanguage = initialLanguage,
@@ -278,6 +292,7 @@ class ZeroInputService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         inputViewActive = true
+        refreshKeyboardAppearance()
         if (graph.clipboardGuard.state.status in setOf(
                 dev.zeroinput.ime.clipboardguard.ClipboardGuardStatus.UNAVAILABLE,
                 dev.zeroinput.ime.clipboardguard.ClipboardGuardStatus.BLOCKED,
@@ -294,6 +309,10 @@ class ZeroInputService : InputMethodService() {
         val isNight = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
             Configuration.UI_MODE_NIGHT_YES
         WindowCompat.getInsetsController(imeWindow, imeWindow.decorView).isAppearanceLightNavigationBars = !isNight
+        val context = inputView?.context ?: this
+        @Suppress("DEPRECATION")
+        imeWindow.navigationBarColor = com.google.android.material.color.MaterialColors.getColor(context,
+            com.google.android.material.R.attr.colorSurface, android.graphics.Color.BLACK)
     }
 
     override fun onFinishInput() {
@@ -352,6 +371,7 @@ class ZeroInputService : InputMethodService() {
         localDataExecutor.shutdownNow()
         personalizationRefreshPending.set(false)
         mainHandler.removeCallbacksAndMessages(null)
+        inputView?.release()
         inputView = null
         super.onDestroy()
     }

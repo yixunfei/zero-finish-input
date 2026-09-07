@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="keyboardKeyRadius" format="dimension" />
+    <attr name="keyboardKeyInset" format="dimension" />
+    <declare-styleable name="KeyboardKeyAppearance">
+        <attr name="keyboardKeyRadius" />
+        <attr name="keyboardKeyInset" />
+    </declare-styleable>
+    <style name="ThemeOverlay.ZeroInput.Keyboard.Classic" parent="">
+        <item name="keyboardKeyRadius">0dp</item>
+        <item name="keyboardKeyInset">0dp</item>
+    </style>
+    <style name="ThemeOverlay.ZeroInput.Keyboard.Gray" parent="">
+        <item name="colorPrimary">@color/keyboard_gray_primary</item>
+        <item name="colorPrimaryContainer">@color/keyboard_gray_accent</item>
+        <item name="colorSecondaryContainer">@color/keyboard_gray_accent</item>
+        <item name="colorSurface">@color/keyboard_gray_surface</item>
+        <item name="colorOnSurface">@color/keyboard_gray_text</item>
+        <item name="colorSurfaceVariant">@color/keyboard_gray_modifier</item>
+        <item name="colorOutline">@color/keyboard_gray_outline</item>
+        <item name="android:textColorPrimary">@color/keyboard_gray_text</item>
+        <item name="android:textColorSecondary">@color/keyboard_gray_text</item>
+        <item name="keyboardKeyRadius">4dp</item>
+        <item name="keyboardKeyInset">2dp</item>
+    </style>
+    <style name="ThemeOverlay.ZeroInput.Keyboard.Mint" parent="">
+        <item name="colorPrimary">@color/keyboard_mint_primary</item>
+        <item name="colorPrimaryContainer">@color/keyboard_mint_accent</item>
+        <item name="colorSecondaryContainer">@color/keyboard_mint_secondary</item>
+        <item name="colorSurface">@color/keyboard_mint_surface</item>
+        <item name="colorOnSurface">@color/keyboard_mint_text</item>
+        <item name="colorSurfaceVariant">@color/keyboard_mint_modifier</item>
+        <item name="colorOutline">@color/keyboard_mint_outline</item>
+        <item name="android:textColorPrimary">@color/keyboard_mint_text</item>
+        <item name="android:textColorSecondary">@color/keyboard_mint_text</item>
+        <item name="keyboardKeyRadius">6dp</item>
+        <item name="keyboardKeyInset">2dp</item>
+    </style>
+    <style name="ThemeOverlay.ZeroInput.Keyboard.Rose" parent="">
+        <item name="colorPrimary">@color/keyboard_rose_primary</item>
+        <item name="colorPrimaryContainer">@color/keyboard_rose_accent</item>
+        <item name="colorSecondaryContainer">@color/keyboard_rose_secondary</item>
+        <item name="colorSurface">@color/keyboard_rose_surface</item>
+        <item name="colorOnSurface">@color/keyboard_rose_text</item>
+        <item name="colorSurfaceVariant">@color/keyboard_rose_modifier</item>
+        <item name="colorOutline">@color/keyboard_rose_outline</item>
+        <item name="android:textColorPrimary">@color/keyboard_rose_text</item>
+        <item name="android:textColorSecondary">@color/keyboard_rose_text</item>
+        <item name="keyboardKeyRadius">6dp</item>
+        <item name="keyboardKeyInset">2dp</item>
+    </style>
+    <color name="keyboard_gray_primary">#303C4B</color>
+    <color name="keyboard_gray_accent">#CCD9E6</color>
+    <color name="keyboard_gray_surface">#F3F4F5</color>
+    <color name="keyboard_gray_text">#202225</color>
+    <color name="keyboard_gray_modifier">#DEE1E4</color>
+    <color name="keyboard_gray_outline">#A5ABB1</color>
+    <color name="keyboard_mint_primary">#006B5D</color>
+    <color name="keyboard_mint_accent">#A6E9D8</color>
+    <color name="keyboard_mint_secondary">#F6D9CC</color>
+    <color name="keyboard_mint_surface">#F0F9F7</color>
+    <color name="keyboard_mint_text">#173A34</color>
+    <color name="keyboard_mint_modifier">#D5EAE4</color>
+    <color name="keyboard_mint_outline">#96B5AC</color>
+    <color name="keyboard_rose_primary">#923951</color>
+    <color name="keyboard_rose_accent">#F2BED0</color>
+    <color name="keyboard_rose_secondary">#D2E9E4</color>
+    <color name="keyboard_rose_surface">#FFF6F8</color>
+    <color name="keyboard_rose_text">#42232C</color>
+    <color name="keyboard_rose_modifier">#F1DEE4</color>
+    <color name="keyboard_rose_outline">#BA9DA7</color>
+</resources>

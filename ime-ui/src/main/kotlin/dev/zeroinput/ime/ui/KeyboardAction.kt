@@ -40,10 +40,12 @@ internal data class KeySpec(
     val action: KeyboardAction,
     val widthWeight: Float = 1f,
     val style: KeyStyle = KeyStyle.NORMAL,
+    val enabled: Boolean = true,
 )
 
 internal enum class KeyboardPage {
     LETTERS,
     SYMBOLS,
     MORE_SYMBOLS,
+    NUMERIC,
 }

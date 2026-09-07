@@ -6,34 +6,69 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import androidx.core.content.withStyledAttributes
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import dev.zeroinput.engine.api.ChineseKeyboardLayout
+import dev.zeroinput.ime.core.EditorInputOptions
+import dev.zeroinput.ime.core.EditorLayout
+import dev.zeroinput.ime.core.EnterAction
 
-class KeyboardPanel @JvmOverloads constructor(
-    context: Context,
-    attrs: AttributeSet? = null,
-) : LinearLayout(context, attrs) {
+class KeyboardPanel @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : LinearLayout(context, attrs) {
     var onAction: (KeyboardAction) -> Unit = {}
     var onUserInteraction: () -> Unit = {}
     var onClearComposition: () -> Boolean = { false }
     private var backspaceRepeater: BackspaceRepeater? = null
-
     private var page = KeyboardPage.LETTERS
-    private var shifted = false
+    private var shift = Shift.OFF
     private var languageLabel = "中"
     private var keyboardLayout = ChineseKeyboardLayout.FULL
+    private var editor = EditorInputOptions()
+    private var composing = false
+    private var height = KeyboardHeight.STANDARD
+    private var geometry = emptyList<List<Float>>()
     private val keys = mutableListOf<KeyboardKeyView>()
+    private var radius = 0f
+    private var inset = 0
 
     init {
         orientation = VERTICAL
-        gravity = Gravity.CENTER
         isMotionEventSplittingEnabled = true
+        context.withStyledAttributes(attrs = R.styleable.KeyboardKeyAppearance) {
+            radius = getDimension(R.styleable.KeyboardKeyAppearance_keyboardKeyRadius, 0f)
+            inset = getDimensionPixelSize(R.styleable.KeyboardKeyAppearance_keyboardKeyInset, 0)
+        }
         render()
     }
 
     fun setLanguageLabel(value: String) {
         if (languageLabel == value) return
         languageLabel = value
+        shift = Shift.OFF
         render()
+    }
+
+    fun setHeight(value: KeyboardHeight) {
+        if (height == value) return
+        cancelPendingGestures()
+        height = value
+        for (index in 0 until childCount) getChildAt(index).layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, rowHeight())
+    }
+
+    fun startEditor(value: EditorInputOptions) {
+        editor = value
+        composing = false
+        shift = Shift.OFF
+        page = if (value.layout == EditorLayout.TEXT) KeyboardPage.LETTERS else KeyboardPage.NUMERIC
+        render()
+    }
+
+    fun setComposing(value: Boolean) {
+        if (composing == value) return
+        composing = value
+        // Only the action label changes when composition starts or ends.
+        val specs = specs().flatten()
+        keys.forEachIndexed { index, key -> if (specs[index].action == KeyboardAction.Enter) bind(key, specs[index]) }
     }
 
     fun showLetters() {
@@ -45,115 +80,123 @@ class KeyboardPanel @JvmOverloads constructor(
     fun setKeyboardLayout(value: ChineseKeyboardLayout) {
         if (keyboardLayout == value) return
         keyboardLayout = value
-        page = KeyboardPage.LETTERS
-        shifted = false
+        shift = Shift.OFF
+        if (editor.layout == EditorLayout.TEXT) page = KeyboardPage.LETTERS
         render()
+    }
+
+    private fun specs(): List<List<KeySpec>> = when (page) {
+        KeyboardPage.LETTERS -> if (keyboardLayout == ChineseKeyboardLayout.NINE_KEY)
+            KeyboardLayouts.nineKey(context, languageLabel) else KeyboardLayouts.letters(context, shift != Shift.OFF, languageLabel)
+        KeyboardPage.SYMBOLS -> KeyboardLayouts.symbols(context, languageLabel)
+        KeyboardPage.MORE_SYMBOLS -> KeyboardLayouts.moreSymbols(context, languageLabel)
+        KeyboardPage.NUMERIC -> NumericKeyboardLayout.rows(context, editor)
     }
 
     private fun render() {
         cancelPendingGestures()
+        val rows = specs()
+        val updated = rows.map { row -> row.map(KeySpec::widthWeight) }
+        if (geometry != updated) rebuild(rows, updated)
+        rows.flatten().forEachIndexed { index, spec -> bind(keys[index], spec) }
+    }
+
+    private fun rebuild(rows: List<List<KeySpec>>, updated: List<List<Float>>) {
+        keys.forEach { it.isEnabled = false; it.onAction = {}; it.setOnLongClickListener(null) }
         removeAllViews()
         keys.clear()
         backspaceRepeater = null
-        val rows = when (page) {
-            KeyboardPage.LETTERS -> if (keyboardLayout == ChineseKeyboardLayout.NINE_KEY)
-                KeyboardLayouts.nineKey(context, languageLabel) else KeyboardLayouts.letters(shifted, languageLabel)
-            KeyboardPage.SYMBOLS -> KeyboardLayouts.symbols(languageLabel)
-            KeyboardPage.MORE_SYMBOLS -> KeyboardLayouts.moreSymbols(languageLabel)
+        geometry = updated
+        rows.forEach { specs ->
+            val row = KeyboardRow(context).apply {
+                weights = specs.map(KeySpec::widthWeight)
+                layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight())
+            }
+            specs.forEach { spec -> row.addView(createKey(spec)) }
+            addView(row)
         }
-        rows.forEach(::addRow)
     }
 
-    private fun addRow(specs: List<KeySpec>) {
-        val row = KeyboardRow(context, specs.map(KeySpec::widthWeight)).apply {
-            val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (landscape) 48 else KEY_ROW_HEIGHT_DP))
-        }
-        specs.forEach { spec -> row.addView(createKey(spec)) }
-        addView(row)
-    }
-
-    private fun createKey(spec: KeySpec): KeyboardKeyView = KeyboardKeyView(context, backgroundColor(spec.style),
-        backgroundColor(KeyStyle.PRIMARY), androidx.core.graphics.ColorUtils.setAlphaComponent(
-            resolveColor(com.google.android.material.R.attr.colorOutline, Color.GRAY), 80)).apply {
-        text = spec.label
-        contentDescription = spec.contentDescription
-        textSize = if (spec.label.length > 2) 13f else 19f
-        letterSpacing = 0f
-        isAllCaps = false
+    private fun createKey(spec: KeySpec) = KeyboardKeyView(context).apply {
         gravity = Gravity.CENTER
         minWidth = 0
         minimumWidth = 0
         minHeight = 0
         minimumHeight = 0
-        setTextColor(resolveColor(com.google.android.material.R.attr.colorOnSurface, Color.BLACK))
-        layoutParams = LayoutParams(0, LayoutParams.MATCH_PARENT, spec.widthWeight)
-        setOnClickListener { handleAction(spec.action) }
+        isAllCaps = false
+        letterSpacing = 0f
+        setSingleLine()
+        setTextColor(color(com.google.android.material.R.attr.colorOnSurface))
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        onAction = ::handleAction
         if (spec.action == KeyboardAction.Backspace) {
-            backspaceRepeater = BackspaceRepeater(this, { onClearComposition() }) {
-                onAction(KeyboardAction.Backspace)
+            backspaceRepeater = BackspaceRepeater(this, { onClearComposition() }) { onAction(KeyboardAction.Backspace) }
+        }
+        if (spec.action == KeyboardAction.Shift) {
+            setOnLongClickListener {
+                onUserInteraction()
+                shift = if (shift == Shift.LOCKED) Shift.OFF else Shift.LOCKED
+                render()
+                true
             }
+            ViewCompat.replaceAccessibilityAction(this, AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK,
+                context.getString(R.string.key_caps_lock)) { _, _ -> performLongClick() }
         }
         keys += this
     }
 
-    fun cancelPendingGestures() { backspaceRepeater?.cancel(); keys.forEach { it.cancelTouch() } }
+    private fun bind(view: KeyboardKeyView, original: KeySpec) {
+        val spec = if (original.action == KeyboardAction.Enter) {
+            val label = context.getString(if (composing) R.string.key_enter else enterLabel())
+            original.copy(label = if (composing || editor.enterAction == EnterAction.NEW_LINE) "↵" else label, contentDescription = label)
+        } else if (original.action == KeyboardAction.Shift) {
+            original.copy(label = if (shift == Shift.LOCKED) "⇪" else "⇧")
+        } else original
+        view.bind(spec)
+        androidx.core.widget.TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(view, 10,
+            if (spec.label.length > 2) 13 else 19, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+        val selected = spec.action == KeyboardAction.Shift && shift != Shift.OFF
+        view.isSelected = selected
+        ViewCompat.setStateDescription(view, if (spec.action == KeyboardAction.Shift)
+            context.getString(when (shift) { Shift.OFF -> R.string.key_lowercase; Shift.ON -> R.string.key_uppercase; Shift.LOCKED -> R.string.key_caps_lock }) else null)
+        view.setColors(backgroundColor(if (selected) KeyStyle.PRIMARY else spec.style), backgroundColor(KeyStyle.PRIMARY),
+            androidx.core.graphics.ColorUtils.setAlphaComponent(color(com.google.android.material.R.attr.colorOutline), 80), radius, inset)
+    }
 
-    internal val preferredHeight: Int
-        get() = paddingTop + paddingBottom + (0 until childCount).sumOf { getChildAt(it).layoutParams.height }
-
-    override fun onDetachedFromWindow() {
-        cancelPendingGestures()
-        super.onDetachedFromWindow()
+    private fun enterLabel(): Int = when (editor.enterAction) {
+        EnterAction.NEW_LINE -> R.string.key_enter
+        EnterAction.GO -> R.string.key_go
+        EnterAction.SEARCH -> R.string.key_search
+        EnterAction.SEND -> R.string.key_send
+        EnterAction.NEXT -> R.string.key_next
+        EnterAction.DONE -> R.string.key_done
+        EnterAction.PREVIOUS -> R.string.key_previous
     }
 
     private fun handleAction(action: KeyboardAction) {
         when (action) {
-            KeyboardAction.Shift -> {
-                onUserInteraction()
-                shifted = !shifted
-                render()
-            }
-            KeyboardAction.ShowLetters -> {
-                onUserInteraction()
-                page = KeyboardPage.LETTERS
-                render()
-            }
-            KeyboardAction.ShowSymbols -> {
-                onUserInteraction()
-                page = KeyboardPage.SYMBOLS
-                render()
-            }
-            KeyboardAction.ShowMoreSymbols -> {
-                onUserInteraction()
-                page = KeyboardPage.MORE_SYMBOLS
-                render()
-            }
+            KeyboardAction.Shift -> { onUserInteraction(); shift = if (shift == Shift.OFF) Shift.ON else Shift.OFF; render() }
+            KeyboardAction.ShowLetters -> { onUserInteraction(); page = KeyboardPage.LETTERS; render() }
+            KeyboardAction.ShowSymbols -> { onUserInteraction(); page = KeyboardPage.SYMBOLS; render() }
+            KeyboardAction.ShowMoreSymbols -> { onUserInteraction(); page = KeyboardPage.MORE_SYMBOLS; render() }
             is KeyboardAction.Text -> {
                 onAction(action)
-                if (shifted) {
-                    shifted = false
-                    render()
-                }
+                if (shift == Shift.ON) { shift = Shift.OFF; render() }
             }
             else -> onAction(action)
         }
     }
 
-    private fun backgroundColor(style: KeyStyle): Int = when (style) {
-        KeyStyle.NORMAL -> resolveColor(com.google.android.material.R.attr.colorSurface, 0xfff4f5f5.toInt())
-        KeyStyle.MODIFIER -> resolveColor(com.google.android.material.R.attr.colorSurfaceVariant, 0xffe2e5e4.toInt())
-        KeyStyle.PRIMARY -> resolveColor(com.google.android.material.R.attr.colorPrimaryContainer, 0xffbceadd.toInt())
-    }
-
-    private fun resolveColor(attribute: Int, fallback: Int): Int {
-        val values = context.obtainStyledAttributes(intArrayOf(attribute))
-        return values.getColor(0, fallback).also { values.recycle() }
-    }
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private companion object {
-        const val KEY_ROW_HEIGHT_DP = 52
-    }
+    fun cancelPendingGestures() { backspaceRepeater?.cancel(); keys.forEach { it.cancelTouch() } }
+    internal val preferredHeight: Int get() = (0 until childCount).sumOf { getChildAt(it).layoutParams.height }
+    override fun onDetachedFromWindow() { cancelPendingGestures(); super.onDetachedFromWindow() }
+    private fun rowHeight() = dp(height.rowHeight(resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE))
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    private fun backgroundColor(style: KeyStyle) = color(when (style) {
+        KeyStyle.NORMAL -> com.google.android.material.R.attr.colorSurface
+        KeyStyle.MODIFIER -> com.google.android.material.R.attr.colorSurfaceVariant
+        KeyStyle.PRIMARY -> com.google.android.material.R.attr.colorPrimaryContainer
+    })
+    private fun color(attribute: Int): Int = com.google.android.material.color.MaterialColors.getColor(context, attribute, Color.GRAY)
+    private enum class Shift { OFF, ON, LOCKED }
 }

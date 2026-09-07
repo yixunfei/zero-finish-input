@@ -99,6 +99,7 @@ class MainActivity : AppCompatActivity() {
         screen.onSecureClipboardChanged = ::setSecureClipboardEnabled
         screen.onClipboardGuardRequested = { startActivity(Intent(this, ClipboardGuardSettingsActivity::class.java)) }
         screen.onHapticsChanged = { graph.settings.hapticFeedbackEnabled = it; render() }
+        screen.onAppearanceRequested = { startActivity(Intent(this, KeyboardAppearanceActivity::class.java)) }
         screen.onChineseOptionsChanged = { graph.settings.chineseInputOptions = it; render() }
         screen.onChineseEngineChanged = {
             graph.settings.chineseEngine = it

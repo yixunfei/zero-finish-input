@@ -15,6 +15,7 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
     var onCandidateSelected: (Int) -> Unit = {}
     var onExpandRequested: () -> Unit = {}
     var onRetryRequested: () -> Unit = {}
+    var onToolsRequested: () -> Unit = {}
     private val composition = TextView(context).apply {
         textSize = 14f
         gravity = Gravity.CENTER_VERTICAL
@@ -36,6 +37,7 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
         addView(candidates)
     }
     private val expand = panelIconButton(context, android.R.drawable.arrow_down_float, R.string.expand_candidates) { onExpandRequested() }
+    private val tools = panelIconButton(context, R.drawable.ic_keyboard_tools, R.string.keyboard_tools) { onToolsRequested() }
     private val retry = panelIconButton(context, android.R.drawable.ic_popup_sync, R.string.retry_engine) { onRetryRequested() }
     private val buttons = mutableListOf<CandidateItemView>()
     private var previousSnapshot: EngineSnapshot? = null
@@ -54,6 +56,7 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
         }
         addView(statusRow, if (landscape) LayoutParams(0, dp(48), 1f) else LayoutParams(LayoutParams.MATCH_PARENT, dp(24)))
         addView(LinearLayout(context).apply {
+            addView(tools, LayoutParams(dp(48), dp(48)))
             addView(scroll, LayoutParams(0, dp(48), 1f))
             addView(retry, LayoutParams(dp(48), dp(48)))
             addView(expand, LayoutParams(dp(48), dp(48)))

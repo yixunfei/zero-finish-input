@@ -173,4 +173,8 @@
         <item quantity="other">%1$d 条颜文字</item>
     </plurals>
     <string name="expression_delete_message">删除这条颜文字及其收藏状态，且无法恢复。</string>
+    <string name="keyboard_appearance">键盘外观</string>
+    <string name="keyboard_style">内置样式</string>
+    <string name="keyboard_height">键盘高度</string>
+    <string name="keyboard_preview">预览</string>
 </resources>

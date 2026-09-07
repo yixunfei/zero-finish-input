@@ -97,7 +97,7 @@ class InputPanelTest {
             panel = panel(false)
             measure(panel, 320)
             panel.onKeyboardAction = { if (it == KeyboardAction.Backspace) { deletes++; repeated.countDown() } }
-            touch(button(panel, "退格"), MotionEvent.ACTION_DOWN)
+            touch(button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.key_backspace)), MotionEvent.ACTION_DOWN)
         }
         assertTrue("Holding backspace must repeat", repeated.await(2, TimeUnit.SECONDS))
         var countAtCancellation = 0
@@ -116,7 +116,7 @@ class InputPanelTest {
             measure(panel, 320)
             panel.onClearCompositionRequested = { cleared.countDown(); true }
             panel.onKeyboardAction = { if (it == KeyboardAction.Backspace) deletes++ }
-            touch(button(panel, "退格"), MotionEvent.ACTION_DOWN)
+            touch(button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.key_backspace)), MotionEvent.ACTION_DOWN)
         }
         assertTrue("Long press must request composition clearing", cleared.await(2, TimeUnit.SECONDS))
         Thread.sleep(180)
@@ -150,7 +150,7 @@ class InputPanelTest {
         measure(panel, 800, 360)
         val keyboard = visible(panel).filterIsInstance<KeyboardPanel>().single()
         val emoji = visible(panel).filterIsInstance<EmojiPanelView>().single()
-        for (view in visible(keyboard) + listOf(emoji, button(panel, "返回键盘"))) {
+        for (view in visible(keyboard) + listOf(emoji, button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.keyboard_return)))) {
             val bounds = Rect(0, 0, view.width, view.height)
             panel.offsetDescendantRectToMyCoords(view, bounds)
             assertTrue("Keyboard rows and return control must fit the input window", bounds.top >= 0 && bounds.bottom <= panel.height)
@@ -208,7 +208,7 @@ class InputPanelTest {
         assertLabelsFit(panel)
         assertTrue(visible(panel).any { it is SecureClipboardPanelView })
         assertFalse(visible(panel).any { it is KeyboardPanel || it is CandidateStripView })
-        button(panel, "返回键盘").performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.keyboard_return)).performClick()
         assertTrue(visible(panel).any { it is KeyboardPanel })
         assertFalse(visible(panel).any { it is SecureClipboardPanelView })
         button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_smileys)).performClick()
@@ -217,7 +217,7 @@ class InputPanelTest {
         button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_search)).performClick()
         measure(panel, 320)
         val searchHeight = panel.measuredHeight
-        button(panel, "返回键盘").performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.keyboard_return)).performClick()
         button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.expression_smileys)).performClick()
         measure(panel, 320)
         assertTrue("Returning to active emoji search must preserve its height", panel.measuredHeight == searchHeight)

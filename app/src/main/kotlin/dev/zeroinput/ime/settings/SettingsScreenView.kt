@@ -52,6 +52,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
     var onHapticsChanged: (Boolean) -> Unit = {}
     var onDictionaryRequested: () -> Unit = {}
     var onExpressionsRequested: () -> Unit = {}
+    var onAppearanceRequested: () -> Unit = {}
     var onPersonalDataClearRequested: () -> Unit = {}
     var onSecureClipboardRequested: () -> Unit = {}
     var onClipboardGuardRequested: () -> Unit = {}
@@ -173,6 +174,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
 
         section(context.getString(R.string.section_input))
         content.addView(hapticsSwitch)
+        command(context.getString(R.string.keyboard_appearance)) { onAppearanceRequested() }
 
         section(context.getString(R.string.chinese_input_settings))
         content.addView(engineChoices)

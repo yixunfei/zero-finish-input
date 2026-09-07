@@ -427,6 +427,34 @@ class InputSessionControllerTest {
     }
 
     @Test
+    fun `no enter action flag sends newline without invoking send even in a private editor`() {
+        for (private in listOf(false, true)) {
+            val connection = RecordingConnection()
+            val controller = InputSessionController(connection, { TestEngine() }, RecordingPersonalization())
+            val info = textEditor().apply {
+                imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_ENTER_ACTION
+                if (private) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            controller.start(info, InputLanguage.CHINESE, PrivacyConfiguration())
+            controller.handle(InputCommand.Enter)
+            assertEquals(1, connection.enterKeys)
+            assertTrue(connection.editorActions.isEmpty())
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `empty composition uses the editor search action and falls back only if declined`() {
+        val connection = RecordingConnection()
+        val controller = InputSessionController(connection, { TestEngine() }, RecordingPersonalization())
+        controller.start(textEditor().apply { imeOptions = EditorInfo.IME_ACTION_SEARCH }, InputLanguage.CHINESE, PrivacyConfiguration())
+        controller.handle(InputCommand.Enter)
+        assertEquals(listOf(EditorInfo.IME_ACTION_SEARCH), connection.editorActions)
+        assertEquals(1, connection.enterKeys)
+        controller.close()
+    }
+
+    @Test
     fun `enter is sent to the engine before falling back for unknown composition`() {
         val connection = RecordingConnection()
         val engine = UnconsumingEngine(composition = "qz")
@@ -606,6 +634,7 @@ class InputSessionControllerTest {
 
     private class RecordingConnection : EditorConnection {
         val commits = mutableListOf<String>()
+        val editorActions = mutableListOf<Int>()
         var enterKeys = 0
 
         override fun setComposingText(text: String) = Unit
@@ -614,7 +643,7 @@ class InputSessionControllerTest {
             commits += text
         }
         override fun deleteBeforeCursor() = Unit
-        override fun performEditorAction(actionId: Int): Boolean = false
+        override fun performEditorAction(actionId: Int): Boolean { editorActions += actionId; return false }
         override fun sendEnterKey() {
             enterKeys += 1
         }

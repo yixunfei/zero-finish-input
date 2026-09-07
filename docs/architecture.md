@@ -135,8 +135,8 @@ and deletion generation. Failed writes do not publish unsaved history. See
 
 The IME window uses an explicit transparent, nondimming base theme in all resource
 variants. Android fullscreen extraction stays disabled. In landscape, the
-composition/status area and candidates share a 48dp row, keyboard rows use 48dp
-touch targets and the expression panel uses 224dp. This leaves the host editor
+composition/status area and candidates share a 48dp row, keyboard rows use at least
+48dp height and the expression panel uses 224dp. This leaves the host editor
 visible without stretching the input view to the application window.
 
 ## User lexicon persistence and transfer
@@ -194,7 +194,9 @@ fuzzy and abbreviation rules into its own prism; the app does not implement a
 second pinyin parser. OpenCC text dictionaries come from the pinned source archive
 and are hash-checked during the build. No runtime downloads are involved.
 
-The input view reserves a 24dp composition/status row and a 48dp candidate row.
+The input view shares one stable header between the toolbar and candidate strip:
+72dp in portrait (24dp composition/status plus 48dp candidates), 48dp in landscape.
+An explicit tools button opens the toolbar while composing without moving keys.
 Expanded candidates reuse the keyboard's measured row geometry, including density
 rounding. Candidate views are reused, reject clicks whose binding changed during
 the gesture, and clear their text when retired. Held backspace clears a composition
@@ -225,8 +227,9 @@ generated from the pinned Luna Pinyin data at build time. Choosing a reading
 replaces the first unresolved numeric span through an allowlisted JNI call;
 backspace can undo that choice. Partial candidate selection disables reading
 replacement so fixed text cannot be overwritten. Reset and close clear history.
-English, sensitive editors and engines without the capability keep the full
-keyboard. Literal digits from the symbols page finish composition before direct
+Text editors in English, sensitive editors and engines without the capability keep the full
+keyboard. Number, phone and date/time editors use a literal numeric layout.
+Literal digits from the symbols page finish composition before direct
 commit, so they cannot accidentally become nine-key spelling codes.
 
 Keyboard rows allocate cumulative pixel boundaries across the full available
@@ -234,6 +237,27 @@ width. Rectangular keys dispatch on release in the current event, support
 independent pointers and cancel when a gesture leaves the target. Input remains
 synchronous through ime-core; public-fixture instrumentation measures key
 dispatch, editor updates and the next frame separately.
+
+## Keyboard appearance and editor actions
+
+`ime-core/EditorInputOptions` contains only immutable public editor configuration:
+layout class, numeric flags and Enter action. It is independent of input text and
+privacy decisions. The controller and UI use the same Enter policy, including
+`IME_FLAG_NO_ENTER_ACTION`. Existing conservative editor privacy classification
+continues to decide whether suggestions and personalization are allowed.
+
+`ime-ui/KeyboardAppearance` owns four resource overlays and three row heights.
+`app` persists only their enum names as nonsensitive settings and applies the
+overlay over the IME window theme. Appearance changes replace the view, release
+its old callbacks and personal bindings, then render the current controller
+snapshot. The existing settings invalidation also cancels pending authentication.
+The nonexported appearance Activity previews the real keyboard with no editor,
+engine or personal-data callbacks. There is no theme download or external asset.
+
+Keyboard rows and keys are reused while their weight geometry is unchanged.
+One-shot Shift resets after a letter; a timed hold locks case. Binding revisions,
+gesture cancellation and view release prevent old touches from sending a changed
+key. Insets affect decoration only, keeping continuous rectangular touch regions.
 
 `InputEngine` 是稳定端口。native 适配器还包含单独的 `NativeRimeBridge` 边界，因此 librime C API
 变化不会传播到 Kotlin 业务层。Rime 运行时显式发布未初始化、初始化中、就绪和失败状态；native

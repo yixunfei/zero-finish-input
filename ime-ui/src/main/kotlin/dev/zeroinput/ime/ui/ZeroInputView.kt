@@ -7,10 +7,12 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.FrameLayout
 import android.widget.Space
 import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
 import com.google.android.material.button.MaterialButton
 import dev.zeroinput.engine.api.InputLanguage
 import dev.zeroinput.engine.api.ChineseInputOptions
@@ -20,6 +22,8 @@ import dev.zeroinput.engine.api.EngineCapability
 import dev.zeroinput.engine.api.EngineSnapshot
 import dev.zeroinput.engine.api.PageDirection
 import dev.zeroinput.ime.core.InputSessionState
+import dev.zeroinput.ime.core.EditorInputOptions
+import dev.zeroinput.ime.core.EditorLayout
 
 class ZeroInputView @JvmOverloads constructor(
     context: Context,
@@ -49,6 +53,9 @@ class ZeroInputView @JvmOverloads constructor(
     var onReadingSelected: (Int) -> Unit = {}
 
     private var mode = PanelMode.KEYBOARD
+    private var editorOptions = EditorInputOptions()
+    private var manualTools = false
+    private var engineStatus = InputEngineStatus.HIDDEN
     private val languageButton = toolbarButton("中", "切换中英文") {
         dispatchKeyboardAction(KeyboardAction.SwitchLanguage)
     }
@@ -81,7 +88,17 @@ class ZeroInputView @JvmOverloads constructor(
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
     }
-    private val returnButton = toolbarButton("⌨", "返回键盘") { showMode(PanelMode.KEYBOARD) }
+    private val returnButton = toolbarButton("⌨", context.getString(R.string.keyboard_return)) {
+        manualTools = false
+        showMode(PanelMode.KEYBOARD)
+    }
+    private val toolbar = createToolbar()
+    private val header = FrameLayout(context).apply {
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dp(if (landscape) 48 else 72))
+        addView(toolbar, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, dp(48), Gravity.CENTER_VERTICAL))
+        addView(candidateStrip, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
 
     init {
         orientation = VERTICAL
@@ -91,9 +108,8 @@ class ZeroInputView @JvmOverloads constructor(
             view.setPadding(bars.left, 0, bars.right, bars.bottom)
             insets
         }
-        addView(createToolbar())
+        addView(header)
         addView(clipboardGuard)
-        addView(candidateStrip)
         content.addView(emoji)
         content.addView(secureClipboard)
         content.addView(keyboardContainer)
@@ -123,6 +139,7 @@ class ZeroInputView @JvmOverloads constructor(
         languageButton.text = if (state.privacy.isSensitive) "🔒" else label
         languageButton.contentDescription = if (state.privacy.isSensitive) "敏感输入保护中" else "切换中英文"
         keyboard.setLanguageLabel(label)
+        keyboard.setComposing(state.snapshot.isComposing)
         candidateStrip.render(state.snapshot)
         scriptButton.visibility = if (state.language == InputLanguage.CHINESE && state.languagePackKey == null &&
             state.privacy.suggestionsAllowed && EngineCapability.CHINESE_SCRIPT in capabilities) View.VISIBLE else View.GONE
@@ -135,9 +152,29 @@ class ZeroInputView @JvmOverloads constructor(
             else expandedCandidates.render(state.snapshot)
         }
         if (!state.snapshot.isComposing) expandedCandidates.clear()
+        if (!state.snapshot.isComposing) manualTools = false
+        refreshHeader()
     }
 
-    fun renderEngineStatus(status: InputEngineStatus) { candidateStrip.renderStatus(status) }
+    fun renderEngineStatus(status: InputEngineStatus) {
+        engineStatus = status
+        candidateStrip.renderStatus(status)
+        refreshHeader()
+    }
+
+    fun startEditor(options: EditorInputOptions) {
+        editorOptions = options
+        manualTools = false
+        emoji.clearSession()
+        keyboard.startEditor(options)
+        showMode(PanelMode.KEYBOARD)
+    }
+
+    fun setKeyboardHeight(height: KeyboardHeight) {
+        keyboard.setHeight(height)
+        readings.layoutParams = LayoutParams(dp(60), keyboard.preferredHeight)
+        updatePanelLayout()
+    }
 
     fun renderClipboardGuard(enabled: Boolean, changed: Boolean) { clipboardGuard.render(enabled, changed) }
 
@@ -155,7 +192,7 @@ class ZeroInputView @JvmOverloads constructor(
     private fun updateKeyboardLayout() {
         val nineKey = currentLanguage == InputLanguage.CHINESE && currentPack == null && !sensitive &&
             chineseLayout == ChineseKeyboardLayout.NINE_KEY && EngineCapability.NINE_KEY_PINYIN in capabilities &&
-            mode != PanelMode.EMOJI
+            mode != PanelMode.EMOJI && editorOptions.layout == EditorLayout.TEXT
         keyboard.setKeyboardLayout(if (nineKey) ChineseKeyboardLayout.NINE_KEY else ChineseKeyboardLayout.FULL)
         readings.visibility = if (nineKey) View.VISIBLE else View.GONE
         val label = context.getString(if (nineKey) R.string.layout_full_short else R.string.layout_nine_short)
@@ -163,6 +200,33 @@ class ZeroInputView @JvmOverloads constructor(
     }
 
     fun cancelPendingGestures() { keyboard.cancelPendingGestures() }
+
+    /** Retire both public bindings and callbacks before replacing the themed view. */
+    fun release() {
+        cancelPendingGestures()
+        onKeyboardAction = {}
+        onCandidateSelected = {}
+        onCandidatePageChanged = {}
+        onEmojiSelected = {}
+        onExpressionFavoriteRequested = { _, _ -> }
+        onExpressionManagementRequested = {}
+        onSecureClipboardSelected = {}
+        onSettingsRequested = {}
+        onClipboardGuardRequested = {}
+        onSecureClipboardManagementRequested = {}
+        onUserInteraction = {}
+        onClearCompositionRequested = { false }
+        onEngineRetryRequested = {}
+        onScriptSwitchRequested = {}
+        onLayoutSwitchRequested = {}
+        onReadingSelected = {}
+        currentSnapshot = EngineSnapshot.Empty
+        candidateStrip.render(currentSnapshot)
+        expandedCandidates.clear()
+        readings.render(currentSnapshot)
+        emoji.clearSession()
+        secureClipboard.render(false, emptyList())
+    }
 
     fun renderExpressions(allowed: Boolean, data: PersonalExpressionsUi, recent: List<String>) {
         emoji.renderPersonal(allowed, data, recent)
@@ -209,6 +273,7 @@ class ZeroInputView @JvmOverloads constructor(
             else if (currentSnapshot.candidates.isNotEmpty()) showMode(PanelMode.CANDIDATES)
         }
         candidateStrip.onRetryRequested = { onEngineRetryRequested() }
+        candidateStrip.onToolsRequested = { onUserInteraction(); manualTools = true; refreshHeader() }
         expandedCandidates.onCandidateSelected = { onCandidateSelected(it) }
         expandedCandidates.onPageChanged = { onCandidatePageChanged(it) }
         emoji.onEmojiSelected = { onEmojiSelected(it) }
@@ -255,16 +320,18 @@ class ZeroInputView @JvmOverloads constructor(
     }
 
     private fun showMode(target: PanelMode) {
+        val leavingSearch = mode == PanelMode.EMOJI && emoji.isSearchActive && target != PanelMode.EMOJI
         if (mode != target) {
             cancelPendingGestures()
             onUserInteraction()
         }
         mode = target
+        if (leavingSearch) keyboard.startEditor(editorOptions)
+        if (target == PanelMode.EMOJI && emoji.isSearchActive) keyboard.startEditor(EditorInputOptions())
         updateKeyboardLayout()
         returnButton.visibility = if (target == PanelMode.KEYBOARD) View.GONE else View.VISIBLE
         layoutButton.visibility = if (target == PanelMode.KEYBOARD && currentLanguage == InputLanguage.CHINESE &&
             EngineCapability.NINE_KEY_PINYIN in capabilities) View.VISIBLE else View.GONE
-        setPanelVisible(candidateStrip, target == PanelMode.KEYBOARD || target == PanelMode.CANDIDATES)
         setPanelVisible(expandedCandidates, target == PanelMode.CANDIDATES)
         candidateStrip.setExpanded(target == PanelMode.CANDIDATES)
         if (target == PanelMode.CANDIDATES) expandedCandidates.render(currentSnapshot)
@@ -276,6 +343,20 @@ class ZeroInputView @JvmOverloads constructor(
             target == PanelMode.KEYBOARD || emoji.isSearchActive && target == PanelMode.EMOJI,
         )
         updatePanelLayout()
+        refreshHeader()
+    }
+
+    private fun refreshHeader() {
+        val hasCandidates = currentSnapshot.isComposing || currentSnapshot.candidates.isNotEmpty()
+        val needsStatus = engineStatus in setOf(InputEngineStatus.PREPARING, InputEngineStatus.PENDING_CONFIGURATION, InputEngineStatus.FAILED)
+        val showCandidates = mode in setOf(PanelMode.KEYBOARD, PanelMode.CANDIDATES) &&
+            !manualTools && (hasCandidates || needsStatus)
+        candidateStrip.visibility = if (showCandidates) VISIBLE else GONE
+        toolbar.visibility = if (showCandidates) GONE else VISIBLE
+        returnButton.visibility = if (mode != PanelMode.KEYBOARD || manualTools) VISIBLE else GONE
+        if (returnButton.isVisible) layoutButton.visibility = GONE
+        else layoutButton.visibility = if (currentLanguage == InputLanguage.CHINESE && currentPack == null && !sensitive &&
+            EngineCapability.NINE_KEY_PINYIN in capabilities && editorOptions.layout == EditorLayout.TEXT) VISIBLE else GONE
     }
 
     private fun setPanelVisible(panel: View, visible: Boolean) {
@@ -285,7 +366,8 @@ class ZeroInputView @JvmOverloads constructor(
     private fun updateEmojiSearchLayout(searchActive: Boolean) {
         if (mode != PanelMode.EMOJI) return
         setPanelVisible(keyboardContainer, searchActive)
-        keyboard.showLetters()
+        keyboard.startEditor(if (searchActive) EditorInputOptions() else editorOptions)
+        if (searchActive) keyboard.setKeyboardLayout(ChineseKeyboardLayout.FULL)
         updatePanelLayout()
     }
 
