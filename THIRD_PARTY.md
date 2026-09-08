@@ -38,3 +38,32 @@ LGPL-3.0 许可；原始词典继续随 APK 提供。`engine-dictionary` 的算�
 APK 的 `assets/expressions/` 包含原始数据与可修改重建的 Kotlin 数据源码；界面、搜索、加密存储
 代码仍采用项目 Apache-2.0 许可。没有新增运行时库、权限或下载路径。
 `aoguai/rime_kaomoji_dict` 和 `overmind1980/-` 仅作参考，未将其收集数据打包分发。
+
+## Experimental model scoring and evaluation
+
+The `model-scoring` module and separate `tools/model-benchmark` project use
+`com.microsoft.onnxruntime:onnxruntime-android:1.26.0` under MIT
+([license](LICENSES/onnxruntime-MIT.txt)). Its runtime is initialized explicitly
+on a bounded worker and adds no network permission, telemetry configuration or
+exported application component. The IME uses the runtime through an engine-api
+scoring port. The standalone benchmark itself is excluded from the IME APK.
+The runtime is necessary for the evaluated ONNX graph; its AAR is pinned to
+1.26.0 and SHA-256 `09c0780ae8d734ef2774bdf498b624729a855e6f9a8e488a0e7398a4e7396032`.
+It is maintained upstream, but its full CPU native libraries add 19.58--33.30 MB
+per ABI before APK compression. Model/runtime size and limitations are reported
+separately; reduced runtimes require a fresh numerical and ABI evaluation.
+The runtime's upstream third-party notices from tag `v1.26.0` are preserved in
+`LICENSES/onnxruntime-ThirdPartyNotices.txt` (Git blob
+`fbd9f9a95f6013d8ecaef81e02b0033e5882a675`) and bundled with both applications.
+
+Host export uses ONNX 1.19.0 (Apache-2.0), ml_dtypes 0.5.3 (Apache-2.0), the
+existing host PyTorch 2.12.0+cpu and ONNX Runtime 1.26.0. These host packages are
+not bundled. Public UER Tiny/Mini checkpoints are downloaded for local conversion
+at pinned revisions with content hashes. The user confirmed the UER
+project's Apache-2.0 license as the model licensing basis on 2026-09-08; the
+separate model cards do not declare license metadata. The IME bundles only the
+Mini INT8 derivative and vocabulary (15,008,304 bytes combined); generated graphs
+are staged from ignored build directories with strict size and SHA-256 checks.
+Source revision, conversion changes, hashes and the accepted experimental quality
+exception are in [model evaluation](docs/small-model-evaluation.md),
+[model integration](docs/model-integration.md), and NOTICE.

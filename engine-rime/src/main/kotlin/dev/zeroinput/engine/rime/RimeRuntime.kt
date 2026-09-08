@@ -3,6 +3,7 @@ package dev.zeroinput.engine.rime
 import android.content.Context
 import dev.zeroinput.engine.api.ChineseInputOptions
 import dev.zeroinput.engine.api.ChineseKeyboardLayout
+import dev.zeroinput.engine.api.InputEngine
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -12,11 +13,13 @@ class RimeRuntime(context: Context) : AutoCloseable {
     private val activeEngines = AtomicInteger(0)
     private var configurationInstaller: RimeConfigurationInstaller? = null
     private var preparedSchemaId: String? = null
-    private val nineKeyReadings by lazy {
+    private val publicSyllables by lazy {
         applicationContext.assets.open("pinyin-syllables.txt").bufferedReader().use {
-            NineKeyReadings(it.readLines())
+            it.readLines()
         }
     }
+    private val nineKeyReadings by lazy { NineKeyReadings(publicSyllables) }
+    private val relatedReadings by lazy { RelatedReadings(publicSyllables) }
 
     @Volatile
     var isReady: Boolean = false
@@ -104,7 +107,7 @@ class RimeRuntime(context: Context) : AutoCloseable {
 
     fun version(): String = if (isReady) runtimeVersion else "unavailable"
 
-    internal fun createEngine(options: ChineseInputOptions): RimeInputEngine? = synchronized(lock) {
+    internal fun createEngine(options: ChineseInputOptions): InputEngine? = synchronized(lock) {
         check(isReady) { "Rime runtime is not initialized" }
         val id = PinyinAlgebra.schemaId(options)
         if (id != preparedSchemaId) {
@@ -127,9 +130,16 @@ class RimeRuntime(context: Context) : AutoCloseable {
             setState(RimeRuntimeState.READY)
         }
         try {
-            RimeInputEngine(id, options, ::markFailed, ::releaseEngine,
+            val primary = RimeInputEngine(id, options, ::markFailed, ::releaseEngine,
                 if (options.keyboardLayout == ChineseKeyboardLayout.NINE_KEY) nineKeyReadings else null)
                 .also { activeEngines.incrementAndGet() }
+            if (options.keyboardLayout == ChineseKeyboardLayout.NINE_KEY) primary else {
+                try {
+                    val secondary = RimeInputEngine(id, options, ::markFailed, ::releaseEngine)
+                        .also { activeEngines.incrementAndGet() }
+                    ExpandingRimeEngine(primary, secondary, relatedReadings)
+                } catch (error: Exception) { primary.close(); throw error }
+            }
         } catch (error: Exception) {
             markFailed(error)
             null

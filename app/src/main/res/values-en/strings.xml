@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="experimental_model_ranking">Smart word ranking (beta)</string>
+    <string name="experimental_model_help">Uses Chinese entered in this session to reorder two-character words offline. May choose an incorrect first suggestion and uses more memory and power. Off by default; inactive in private input.</string>
+    <string name="experimental_typo_correction">Typo correction (beta)</string>
+    <string name="experimental_typo_help">Full keyboard only. May add distracting suggestions and use more power.</string>
     <string name="clipboard_guard_title">System clipboard guard</string>
     <string name="clipboard_guard_limit">This feature only tries to shorten how long accidentally copied content remains in the system clipboard and helps you clear it. It cannot prevent access at the instant of writing. Disabled by default.\n\nRequires ZeroInput to be selected, its input service running, and system callbacks available. Changes may be missed; accidental copies cannot be identified.</string>
     <string name="clipboard_guard_listen">Monitor system clipboard changes</string>

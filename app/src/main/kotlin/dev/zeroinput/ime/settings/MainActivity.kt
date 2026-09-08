@@ -101,6 +101,7 @@ class MainActivity : AppCompatActivity() {
         screen.onHapticsChanged = { graph.settings.hapticFeedbackEnabled = it; render() }
         screen.onAppearanceRequested = { startActivity(Intent(this, KeyboardAppearanceActivity::class.java)) }
         screen.onChineseOptionsChanged = { graph.settings.chineseInputOptions = it; render() }
+        screen.onModelRankingChanged = { graph.settings.experimentalModelRanking = it; render() }
         screen.onChineseEngineChanged = {
             graph.settings.chineseEngine = it
             graph.settings.lastLanguagePackKey = null
@@ -227,6 +228,7 @@ class MainActivity : AppCompatActivity() {
                 hapticsEnabled = graph.settings.hapticFeedbackEnabled,
                 engineStatus = engine,
                 chineseOptions = graph.settings.chineseInputOptions,
+                experimentalModelRanking = graph.settings.experimentalModelRanking,
                 chineseEngine = choice,
                 engineCapabilities = graph.chineseEngineDescriptor(choice).capabilities,
                 languagePacks = graph.installedLanguagePacks().map { pack ->

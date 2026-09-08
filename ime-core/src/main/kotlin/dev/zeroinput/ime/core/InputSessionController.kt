@@ -12,6 +12,7 @@ import dev.zeroinput.engine.api.InputLanguage
 import dev.zeroinput.engine.api.PersonalizationStore
 import dev.zeroinput.engine.api.ReadingSelectionEngine
 import dev.zeroinput.engine.api.EngineDescriptor
+import dev.zeroinput.engine.api.CompositionEditingEngine
 import dev.zeroinput.ime.core.privacy.EditorPrivacyPolicy
 import dev.zeroinput.ime.core.privacy.PrivacyConfiguration
 import dev.zeroinput.ime.core.privacy.SessionPrivacy
@@ -42,7 +43,7 @@ class InputSessionController(
         learningAllowed = false,
         reason = dev.zeroinput.ime.core.privacy.PrivacyReason.USER_DISABLED,
     )
-    private var routes: List<CandidateRoute> = emptyList()
+    private var routes: List<CandidateRoute?> = emptyList()
     /**
      * Engine-owned state without the personal-candidate overlay.  Keeping
      * this snapshot separately lets a background personalization query
@@ -50,6 +51,9 @@ class InputSessionController(
      * the engine to mutate its composition.
      */
     private var rawEngineSnapshot = EngineSnapshot.Empty
+    private val recentComposition = RecentComposition()
+    private val candidateWindow = CandidateWindow()
+    private val personalPaging = PersonalCandidatePaging()
 
     var state = InputSessionState()
         private set
@@ -95,6 +99,9 @@ class InputSessionController(
     }
 
     fun handle(command: InputCommand) {
+        if (command != InputCommand.ReconvertLast) invalidateReconversion(publishState = false)
+        if (command !is InputCommand.ChangeCandidatePage && command !is InputCommand.SelectCandidate &&
+            command != InputCommand.Space && command != InputCommand.Enter) candidateWindow.clear()
         if (privacy.isSensitive) {
             handleSensitive(command)
             return
@@ -113,10 +120,25 @@ class InputSessionController(
                 is InputCommand.Text -> handleKey(activeEngine, EngineKey.Character(command.value))
                 is InputCommand.LiteralText -> commitLiteral(activeEngine, command.value)
                 InputCommand.Backspace -> handleKey(activeEngine, EngineKey.Backspace, fallbackBackspace = true)
-                InputCommand.Space -> handleKey(activeEngine, EngineKey.Space)
-                InputCommand.Enter -> handleEnter(activeEngine)
+                InputCommand.Space, InputCommand.Enter -> {
+                    if ((candidateWindow.isBrowsing || personalPaging.isBrowsing || state.modelRanked) && state.snapshot.candidates.isNotEmpty()) {
+                        selectCandidate(activeEngine, state.snapshot.highlightedIndex)
+                    } else if (command == InputCommand.Enter) handleEnter(activeEngine)
+                    else handleKey(activeEngine, EngineKey.Space)
+                }
+                InputCommand.ReconvertLast -> reconvert(activeEngine)
+                InputCommand.UndoSelection -> (activeEngine as? CompositionEditingEngine)?.let {
+                    apply(it.undoSelection())
+                }
+                InputCommand.SelectSyllable -> (activeEngine as? CompositionEditingEngine)?.let {
+                    apply(it.selectSyllable())
+                }
                 is InputCommand.SelectCandidate -> selectCandidate(activeEngine, command.visibleIndex)
-                is InputCommand.ChangeCandidatePage -> apply(activeEngine.changePage(command.direction))
+                is InputCommand.ChangeCandidatePage -> {
+                    if (personalPaging.changePage(command.direction, candidateWindow.snapshot(rawEngineSnapshot))) {
+                        publish(rawEngineSnapshot)
+                    } else apply(candidateWindow.changePage(activeEngine, rawEngineSnapshot, command.direction))
+                }
                 is InputCommand.SelectReading -> (activeEngine as? ReadingSelectionEngine)?.let {
                     apply(it.selectReading(command.index))
                 }
@@ -143,6 +165,8 @@ class InputSessionController(
     }
 
     fun reset() {
+        candidateWindow.clear()
+        invalidateReconversion(publishState = false)
         runCatching { engine?.reset() }
             .onFailure { closeEngine() }
         connection.clearComposingText()
@@ -156,6 +180,47 @@ class InputSessionController(
      * that owns this controller (the IME main thread in the Android service).
      */
     fun refreshPersonalization() {
+        publish(rawEngineSnapshot)
+    }
+
+    /** Main-thread-only handoff. A revision is consumed once and routes remain engine-owned. */
+    fun applyModelWinner(revision: Long, candidateIndex: Int): Boolean {
+        if (revision != state.candidateRevision || candidateWindow.isBrowsing || personalPaging.isBrowsing) return false
+        val candidate = modelCandidates().getOrNull(candidateIndex) ?: return false
+        val promoted = ModelRankingPolicy.promote(state.snapshot, candidate.id) ?: return false
+        rebuildRoutes(promoted)
+        state = state.copy(snapshot = promoted, modelRanked = true, candidateRevision = state.candidateRevision + 1)
+        onStateChanged(state)
+        return true
+    }
+
+    fun modelCandidates(): List<Candidate> = if (candidateWindow.isBrowsing || personalPaging.isBrowsing) emptyList()
+        else ModelRankingPolicy.eligible(state)
+
+    fun clearModelRanking() {
+        if (state.modelRanked) publish(rawEngineSnapshot)
+    }
+
+    fun invalidateReconversion(publishState: Boolean = true) {
+        val changed = recentComposition.available
+        recentComposition.clear()
+        (connection as? ReconversionEditorConnection)?.invalidateReconversion()
+        if (changed && publishState) publish(rawEngineSnapshot)
+    }
+
+    private fun reconvert(activeEngine: InputEngine) {
+        val editing = activeEngine as? CompositionEditingEngine ?: return
+        val editor = connection as? ReconversionEditorConnection ?: return
+        if (state.snapshot.isComposing || !privacy.suggestionsAllowed) return
+        recentComposition.consume { reading, text ->
+            val restored = editing.restoreComposition(reading)
+            if (restored.consumed && restored.snapshot.isComposing && editor.reopenCommittedText(text)) {
+                apply(restored)
+            } else {
+                activeEngine.reset()
+                publish(EngineSnapshot.Empty)
+            }
+        }
         publish(rawEngineSnapshot)
     }
 
@@ -295,6 +360,10 @@ class InputSessionController(
             runCatching { language in prepared.descriptor.languages }.getOrDefault(false)
 
     private fun handleKey(activeEngine: InputEngine, key: EngineKey, fallbackBackspace: Boolean = false) {
+        if (state.modelRanked && key is EngineKey.Character &&
+            key.text.singleOrNull()?.let { !it.isLetterOrDigit() && it != '\'' } == true) {
+            selectCandidate(activeEngine, state.snapshot.highlightedIndex)
+        }
         // The published state is authoritative for the key's starting
         // point. Adapter properties may lag behind the EngineUpdate that was
         // already rendered to the user.
@@ -325,14 +394,19 @@ class InputSessionController(
 
     private fun apply(update: EngineUpdate, learningShortcut: String = "") {
         if (update.committedText.isNotEmpty()) {
+            val reading = update.committedInput.ifBlank { learningShortcut }
             // commitText replaces the active composing span.  Finishing first
             // would make the pre-edit (for example, "ni") permanent and then
             // append the selected candidate (for example, "你").
             connection.commitText(update.committedText)
-            if (privacy.personalizationAllowed) {
+            if (language == InputLanguage.CHINESE && engine is CompositionEditingEngine &&
+                connection is ReconversionEditorConnection && !update.snapshot.isComposing) {
+                recentComposition.remember(reading, update.committedText)
+            }
+            if (privacy.personalizationAllowed && update.learnable) {
                 runCatching {
                     personalization.learn(
-                        shortcut = learningShortcut.ifBlank { update.committedText },
+                        shortcut = reading.ifBlank { update.committedText },
                         value = update.committedText,
                         language = language,
                         learningAllowed = privacy.learningAllowed,
@@ -382,6 +456,7 @@ class InputSessionController(
 
     private fun commitLiteral(activeEngine: InputEngine, text: String) {
         if (text.isEmpty()) return
+        if (state.modelRanked) selectCandidate(activeEngine, state.snapshot.highlightedIndex)
         if (state.snapshot.isComposing) {
             val before = state.snapshot
             val update = activeEngine.handle(EngineKey.Enter)
@@ -407,11 +482,15 @@ class InputSessionController(
                 // mutable property; native adapters may expose a stale
                 // snapshot between callbacks.
                 val learningShortcut = state.snapshot.rawInput
-                apply(activeEngine.selectCandidate(route.engineIndex), learningShortcut)
+                apply(candidateWindow.select(activeEngine, route.reference, rawEngineSnapshot), learningShortcut)
             }
             is CandidateRoute.Personal -> {
+                val reading = route.input.ifBlank { state.snapshot.rawInput }
+                candidateWindow.clear()
                 activeEngine.reset()
                 connection.commitText(route.text)
+                if (language == InputLanguage.CHINESE && activeEngine is CompositionEditingEngine &&
+                    connection is ReconversionEditorConnection) recentComposition.remember(reading, route.text)
                 if (privacy.personalizationAllowed) {
                     runCatching {
                         personalization.recordUse(route.id, learningAllowed = privacy.learningAllowed)
@@ -437,6 +516,9 @@ class InputSessionController(
             is InputCommand.SelectCandidate,
             is InputCommand.SelectReading,
             is InputCommand.ChangeCandidatePage,
+            InputCommand.ReconvertLast,
+            InputCommand.UndoSelection,
+            InputCommand.SelectSyllable,
             -> Unit
         }
         publish(EngineSnapshot.Empty)
@@ -444,32 +526,19 @@ class InputSessionController(
 
     private fun publish(engineSnapshot: EngineSnapshot) {
         rawEngineSnapshot = engineSnapshot
-        val personal = if (privacy.personalizationAllowed && engineSnapshot.rawInput.isNotBlank()) {
-            runCatching {
-                personalization.suggestionsFor(engineSnapshot.rawInput, language, MAX_PERSONAL_CANDIDATES)
-            }.getOrDefault(emptyList())
-        } else {
-            emptyList()
+        val browsed = candidateWindow.snapshot(engineSnapshot)
+        val visibleSnapshot = personalPaging.publish(browsed, personalization, language, privacy.personalizationAllowed) { text ->
+            runCatching { (engine as? CandidateTextNormalizer)?.normalizeCandidateText(text) ?: text }.getOrNull()
         }
-        val personalCandidates = personal.mapNotNull { term ->
-            val text = runCatching {
-                (engine as? CandidateTextNormalizer)?.normalizeCandidateText(term.text) ?: term.text
-            }.getOrNull() ?: return@mapNotNull null
-            Candidate("personal:${term.id}", text, "个人词组", term.frequency)
-        }
-        val candidates = (personalCandidates + engineSnapshot.candidates).distinctBy(Candidate::text)
-        val highlightedId = engineSnapshot.candidates.getOrNull(engineSnapshot.highlightedIndex)?.id
-        val visibleSnapshot = engineSnapshot.copy(
-            candidates = candidates,
-            highlightedIndex = candidates.indexOfFirst { it.id == highlightedId }.coerceAtLeast(0),
-        )
         // The update snapshot is the authoritative view for this event.  Do
         // not resolve engine candidates through the engine's mutable
         // `snapshot` property: adapters may publish that property lazily (or
         // expose a stale value after a native callback), which would make a
         // visible candidate unselectable or select the wrong index.
-        rebuildRoutes(visibleSnapshot, engineSnapshot)
-        state = InputSessionState(language, privacy, visibleSnapshot, languagePackKey, engine?.descriptor)
+        rebuildRoutes(visibleSnapshot)
+        state = InputSessionState(language, privacy, visibleSnapshot, languagePackKey, engine?.descriptor,
+            canReconvert = recentComposition.available && !visibleSnapshot.isComposing,
+            candidateRevision = state.candidateRevision + 1)
         onStateChanged(state)
     }
 
@@ -526,13 +595,12 @@ class InputSessionController(
         if (rawComposition.isNotEmpty()) connection.commitText(rawComposition)
     }
 
-    private fun rebuildRoutes(snapshot: EngineSnapshot, engineSnapshot: EngineSnapshot) {
+    private fun rebuildRoutes(snapshot: EngineSnapshot) {
         routes = snapshot.candidates.map { candidate ->
             if (candidate.id.startsWith("personal:")) {
-                CandidateRoute.Personal(candidate.id.removePrefix("personal:"), candidate.text)
+                CandidateRoute.Personal(candidate.id.removePrefix("personal:"), candidate.text, candidate.input)
             } else {
-                val index = engineSnapshot.candidates.indexOfFirst { it.id == candidate.id }
-                CandidateRoute.Engine(index)
+                candidateWindow.route(candidate.id)?.let(CandidateRoute::Engine)
             }
         }
     }
@@ -544,6 +612,9 @@ class InputSessionController(
     }.getOrNull()
 
     private fun closeEngine() {
+        candidateWindow.clear()
+        personalPaging.clear()
+        invalidateReconversion(publishState = false)
         engine?.let(::closeSafely)
         engine = null
     }
@@ -565,14 +636,11 @@ class InputSessionController(
     }
 
     private sealed interface CandidateRoute {
-        data class Engine(val engineIndex: Int) : CandidateRoute
+        data class Engine(val reference: CandidateWindow.Route) : CandidateRoute
 
-        data class Personal(val id: String, val text: String) : CandidateRoute
+        data class Personal(val id: String, val text: String, val input: String) : CandidateRoute
     }
 
-    private companion object {
-        const val MAX_PERSONAL_CANDIDATES = 3
-    }
 }
 
 data class InputSessionState(
@@ -586,4 +654,7 @@ data class InputSessionState(
     val snapshot: EngineSnapshot = EngineSnapshot.Empty,
     val languagePackKey: String? = null,
     val engineDescriptor: EngineDescriptor? = null,
+    val canReconvert: Boolean = false,
+    val candidateRevision: Long = 0,
+    val modelRanked: Boolean = false,
 )

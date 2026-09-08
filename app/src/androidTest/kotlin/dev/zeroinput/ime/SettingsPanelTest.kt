@@ -43,15 +43,19 @@ class SettingsPanelTest {
         val repository = SettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
         val original = repository.chineseInputOptions
         val originalEngine = repository.chineseEngine
+        val originalModel = repository.experimentalModelRanking
         try {
             val changed = ChineseInputOptions(ChineseScript.TRADITIONAL, false, 255, false, 10, ChineseKeyboardLayout.NINE_KEY)
             repository.chineseInputOptions = changed
             repository.chineseEngine = ChineseEngineChoice.DICTIONARY_TEST
+            repository.experimentalModelRanking = true
             assertEquals(changed, SettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext).chineseInputOptions)
             assertEquals(ChineseEngineChoice.DICTIONARY_TEST, SettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext).chineseEngine)
+            assertTrue(SettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext).experimentalModelRanking)
         } finally {
             repository.chineseInputOptions = original
             repository.chineseEngine = originalEngine
+            repository.experimentalModelRanking = originalModel
         }
     }
 

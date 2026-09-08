@@ -23,6 +23,42 @@ import dev.zeroinput.ime.ui.R as UiR
 class FullscreenInputTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
 
+    @Test fun sameFullscreenEditorAcceptsInputAfterRepeatedLiveRotation() {
+        val original = shell("settings get secure default_input_method").trim()
+        val method = "dev.zeroinput.ime.debug/dev.zeroinput.ime.ZeroInputService"
+        var activity: InputFixtureActivity? = null
+        try {
+            shell("ime enable $method")
+            shell("ime set $method")
+            activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, InputFixtureActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("fullscreen_fixture", true)) as InputFixtureActivity
+            for (orientation in listOf(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)) {
+                onMain { activity.requestedOrientation = orientation }
+                val panel = awaitPanel(orientation)
+                var previousLength = 0
+                onMain {
+                    val point = IntArray(2)
+                    panel.getLocationOnScreen(point)
+                    assertTrue(point[1] >= 48 * panel.resources.displayMetrics.density)
+                    previousLength = activity.editor.length()
+                    panel.onKeyboardAction(dev.zeroinput.ime.ui.KeyboardAction.LiteralText("4"))
+                }
+                instrumentation.waitForIdleSync()
+                onMain {
+                    assertEquals(previousLength + 1, activity.editor.length())
+                    panel.onKeyboardAction(dev.zeroinput.ime.ui.KeyboardAction.Backspace)
+                }
+                instrumentation.waitForIdleSync()
+                onMain { assertEquals(previousLength, activity.editor.length()) }
+            }
+            savePublicFixture("repeated-rotation-landscape.png")
+        } finally {
+            activity?.let { onMain { it.finish() } }
+            if (original.isNotBlank() && original != "null") shell("ime set $original")
+        }
+    }
+
     @Test fun attachedKaomojiSearchLeavesTheEditorUntouchedUntilSelection() {
         val original = shell("settings get secure default_input_method").trim()
         val method = "dev.zeroinput.ime.debug/dev.zeroinput.ime.ZeroInputService"

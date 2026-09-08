@@ -34,6 +34,19 @@ class ClipboardGuardRuntimeTest {
     }
 
     @Test
+    fun selectedImeWaitsForServiceAttachmentBeforeMonitoring() = withFixture { fixture ->
+        fixture.port.stamp = 42
+        fixture.configure(ClipboardGuardOptions(listening = true, clearMode = ClipboardClearMode.AUTOMATIC))
+        await { fixture.runtime.state.status == ClipboardGuardStatus.UNAVAILABLE }
+        assertEquals(0, fixture.created.get())
+        assertEquals(null, fixture.port.listener.get())
+        fixture.runtime.attachIme()
+        await { fixture.runtime.state.status == ClipboardGuardStatus.WAITING && fixture.port.listener.get() != null }
+        assertEquals(0, fixture.port.clears.get())
+        assertEquals(null, fixture.runtime.state.ticket)
+    }
+
+    @Test
     fun disablingWhileAnEventIsBlockedCancelsAutomaticClearAndRemovesTheListener() = withFixture { fixture ->
         fixture.start(ClipboardClearMode.AUTOMATIC)
         val block = ReadBlock()

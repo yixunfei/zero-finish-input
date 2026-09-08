@@ -22,6 +22,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InputSessionControllerTest {
+    @Test fun `space and enter on a later personal page commit its visible selection`() {
+        for (command in listOf(InputCommand.Space, InputCommand.Enter)) {
+            val editor = RecordingConnection()
+            val store = object : dev.zeroinput.engine.api.PagedPersonalizationStore {
+                override fun suggestionPage(prefix: String, language: InputLanguage, offset: Int, limit: Int) =
+                    dev.zeroinput.engine.api.PersonalSuggestionPage(
+                        (offset until minOf(offset + limit, 20)).map { PersonalSuggestion("$it", "词组$it", 1) }, offset + limit < 20)
+                override fun suggestionsFor(prefix: String, language: InputLanguage, limit: Int) = suggestionPage(prefix, language, 0, limit).items
+                override fun learn(shortcut: String, value: String, language: InputLanguage, learningAllowed: Boolean) = Unit
+                override fun recordUse(id: String, learningAllowed: Boolean) = Unit
+            }
+            val controller = InputSessionController(editor, { TestEngine() }, store)
+            controller.start(textEditor(), InputLanguage.CHINESE, PrivacyConfiguration())
+            controller.handle(InputCommand.Text("ni"))
+            controller.handle(InputCommand.ChangeCandidatePage(PageDirection.NEXT))
+            assertEquals("词组8", controller.state.snapshot.candidates.first().text)
+            controller.handle(command)
+            assertEquals(listOf("词组8"), editor.commits)
+            controller.close()
+        }
+    }
+
     @Test
     fun `unknown editor after a normal session clears candidates and never starts another engine`() {
         val connection = ComposingRecordingConnection()

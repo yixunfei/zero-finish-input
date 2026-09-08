@@ -5,6 +5,8 @@ import dev.zeroinput.engine.api.InputLanguage
 import dev.zeroinput.engine.api.LearnedSuggestionSource
 import dev.zeroinput.engine.api.PersonalSuggestion
 import dev.zeroinput.engine.api.PersonalizationStore
+import dev.zeroinput.engine.api.PagedPersonalizationStore
+import dev.zeroinput.engine.api.PersonalSuggestionPage
 import dev.zeroinput.engine.api.WeightedTerm
 import dev.zeroinput.security.EncryptedFileStore
 import dev.zeroinput.security.EncryptedStore
@@ -18,7 +20,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 /** All methods that access the store must run on a background worker. */
-class UserLexiconRepository(private val store: EncryptedStore) : LearnedSuggestionSource, PersonalizationStore {
+class UserLexiconRepository(private val store: EncryptedStore) : LearnedSuggestionSource, PagedPersonalizationStore {
     constructor(context: Context) : this(EncryptedFileStore(
         context = context,
         fileName = "user-lexicon.bin",
@@ -38,16 +40,23 @@ class UserLexiconRepository(private val store: EncryptedStore) : LearnedSuggesti
         suggestionsFor(prefix, InputLanguage.ENGLISH, limit).map { WeightedTerm(it.text, it.frequency) }
 
     override fun suggestionsFor(prefix: String, language: InputLanguage, limit: Int): List<PersonalSuggestion> =
+        suggestionPage(prefix, language, 0, limit).items
+
+    override fun suggestionPage(prefix: String, language: InputLanguage, offset: Int, limit: Int): PersonalSuggestionPage =
         synchronized(lock) {
             require(limit in 0..MAX_SUGGESTION_LIMIT)
+            require(offset in 0..MAX_TERMS)
             val normalized = prefix.trim().lowercase()
-            if (normalized.isEmpty() || limit == 0) return@synchronized emptyList()
-            loadTerms().asSequence()
+            if (normalized.isEmpty() || limit == 0) return@synchronized PersonalSuggestionPage()
+            val values = loadTerms().asSequence()
                 .filter { it.language == language && it.shortcut.lowercase().startsWith(normalized) }
-                .sortedWith(compareByDescending<UserTerm> { it.frequency }.thenByDescending { it.lastUsedEpochMillis })
-                .take(limit)
-                .map { PersonalSuggestion(it.id, it.value, it.frequency) }
+                .sortedWith(compareBy<UserTerm> { !it.shortcut.equals(normalized, ignoreCase = true) }
+                    .thenByDescending { it.frequency }.thenByDescending { it.lastUsedEpochMillis }.thenBy { it.id })
+                .drop(offset)
+                .take(limit + 1)
+                .map { PersonalSuggestion(it.id, it.value, it.frequency, it.shortcut) }
                 .toList()
+            PersonalSuggestionPage(values.take(limit), values.size > limit)
         }
 
     fun list(language: InputLanguage? = null): List<UserTerm> = synchronized(lock) {

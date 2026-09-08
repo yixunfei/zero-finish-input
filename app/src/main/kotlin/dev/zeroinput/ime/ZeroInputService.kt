@@ -53,7 +53,16 @@ class ZeroInputService : InputMethodService() {
     private var inputViewActive = false
     private var currentAppearance: dev.zeroinput.ime.ui.KeyboardAppearance? = null
     private var controller: InputSessionController? = null
+    private var editorConnection: AndroidEditorConnection? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val modelRanking = dev.zeroinput.ime.model.ModelRankingCoordinator(
+        createScorer = { dev.zeroinput.model.RobertaMiniScorer(applicationContext) },
+        post = { mainHandler.post(it) },
+        currentController = { controller },
+        allowed = { modelRankingAllowed() },
+    )
+    private val reconversionExpiry = Runnable { controller?.invalidateReconversion() }
+    private var reconversionExpiryScheduled = false
     private val secureClipboardExecutor = BoundedExecutors.singleThread(
         name = "zeroinput-secure-clipboard",
         queueCapacity = 1,
@@ -176,6 +185,7 @@ class ZeroInputService : InputMethodService() {
                 // can never outlive the configuration under which it began.
                 registerInteraction()
                 inputView?.cancelPendingGestures()
+                controller?.clearModelRanking()
                 refreshKeyboardAppearance()
                 val session = activeSession
                 if (session != null) {
@@ -218,6 +228,7 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onCreateInputView(): View {
+        modelRanking.invalidate()
         inputView?.release()
         val appearance = graph.settings.keyboardAppearance
         val view = ZeroInputView(dev.zeroinput.ime.settings.KeyboardThemeContext.create(this, appearance.theme))
@@ -258,10 +269,13 @@ class ZeroInputService : InputMethodService() {
         val initialPackKey = graph.settings.lastLanguagePackKey
         sessionChineseOptions = graph.settings.chineseInputOptions
         sessionChineseEngine = graph.settings.chineseEngine
+        val editor = AndroidEditorConnection(attribute.initialSelStart, attribute.initialSelEnd,
+            onCommitted = modelRanking::committed, onContextInvalidated = modelRanking::invalidate) {
+            if (activeSession?.token == token) connectionBinding.resolve(currentInputConnection) else null
+        }
+        editorConnection = editor
         val newController = InputSessionController(
-            connection = AndroidEditorConnection {
-                if (activeSession?.token == token) connectionBinding.resolve(currentInputConnection) else null
-            },
+            connection = editor,
             // The first frame must not wait for librime construction or a
             // language-pack dictionary scan.  The warm-up coordinator will
             // replace this in-memory engine when the worker is ready.
@@ -269,7 +283,15 @@ class ZeroInputService : InputMethodService() {
             personalization = graph.personalization,
             onStateChanged = { state ->
                 inputView?.renderSession(state)
+                if (!state.canReconvert) {
+                    mainHandler.removeCallbacks(reconversionExpiry)
+                    reconversionExpiryScheduled = false
+                } else if (!reconversionExpiryScheduled) {
+                    reconversionExpiryScheduled = true
+                    mainHandler.postDelayed(reconversionExpiry, 30_000)
+                }
                 renderEngineStatus()
+                refreshModelRanking()
             },
             languagePackProvider = { null },
             languagePackDiscoveryComplete = graph::isLanguagePackDiscoveryComplete,
@@ -322,6 +344,9 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        modelRanking.invalidate()
+        controller?.clearModelRanking()
+        controller?.invalidateReconversion()
         inputView?.cancelPendingGestures()
         inputViewActive = false
         invalidatePendingPersonalization()
@@ -340,6 +365,7 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        modelRanking.close()
         expressionObserver?.close()
         expressionObserver = null
         clipboardGuardObserver?.close()
@@ -377,6 +403,15 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onEvaluateFullscreenMode(): Boolean = false
+
+    override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
+        candidatesStart: Int, candidatesEnd: Int) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (editorConnection?.updateSelection(newSelStart, newSelEnd, candidatesStart, candidatesEnd) == true) {
+            controller?.clearModelRanking()
+            controller?.invalidateReconversion()
+        }
+    }
 
     /**
      * ZeroInput is a touch-first keyboard. Some Android 16 devices expose a
@@ -433,7 +468,9 @@ class ZeroInputService : InputMethodService() {
             registerInteraction()
             launchActivity(ClipboardGuardSettingsActivity::class.java)
         }
-        view.onUserInteraction = { registerInteraction(); syncSessionPrivacy() }
+        view.onTouchStarted = modelRanking::interaction
+        view.onTouchFinished = ::refreshModelRanking
+        view.onUserInteraction = { modelRanking.invalidate(); registerInteraction(); syncSessionPrivacy() }
         view.onKeyboardAction = ::handleKeyboardAction
         view.onClearCompositionRequested = {
             registerInteraction()
@@ -455,6 +492,9 @@ class ZeroInputService : InputMethodService() {
             reconcileChineseOptions()
         }
         view.onCandidateSelected = { handleControllerCommand(InputCommand.SelectCandidate(it)) }
+        view.onReconvertRequested = { handleControllerCommand(InputCommand.ReconvertLast) }
+        view.onUndoSelectionRequested = { handleControllerCommand(InputCommand.UndoSelection) }
+        view.onSyllableRequested = { handleControllerCommand(InputCommand.SelectSyllable) }
         view.onReadingSelected = { handleControllerCommand(InputCommand.SelectReading(it)) }
         view.onLayoutSwitchRequested = {
             registerInteraction()
@@ -489,6 +529,8 @@ class ZeroInputService : InputMethodService() {
         registerInteraction()
         syncSessionPrivacy()
         maybeReloadLanguagePack()
+        if (action is KeyboardAction.Text || action == KeyboardAction.Backspace) modelRanking.typing()
+        else if (action !in listOf(KeyboardAction.Space, KeyboardAction.Enter)) modelRanking.invalidate()
         if (graph.settings.hapticFeedbackEnabled) {
             inputView?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
         }
@@ -519,7 +561,9 @@ class ZeroInputService : InputMethodService() {
     }
 
     private fun handleControllerCommand(command: InputCommand) {
-        registerInteraction()
+        if (command == InputCommand.ReconvertLast || command == InputCommand.UndoSelection ||
+            command is InputCommand.SelectReading || command == InputCommand.SelectSyllable) modelRanking.invalidate()
+        registerInteraction(preserveReconversion = command == InputCommand.ReconvertLast)
         syncSessionPrivacy()
         maybeReloadLanguagePack()
         controller?.handle(command)
@@ -547,6 +591,7 @@ class ZeroInputService : InputMethodService() {
     }
 
     private fun commitEmoji(entry: EmojiEntry) {
+        modelRanking.invalidate()
         registerInteraction()
         syncSessionPrivacy()
         val session = activeSession ?: return
@@ -634,6 +679,7 @@ class ZeroInputService : InputMethodService() {
     }
 
     private fun unlockAndCommitSecureItem(id: String) {
+        modelRanking.invalidate()
         registerInteraction()
         syncSessionPrivacy()
         if (!graph.settings.secureClipboardEnabled) {
@@ -849,6 +895,7 @@ class ZeroInputService : InputMethodService() {
                 var transferred = false
                 try {
                     // Authentication must not outlive the engine state that authorized it.
+                    modelRanking.invalidate()
                     registerInteraction()
                     transferred = session.controller.adoptPreparedEngine(result.engine)
                     if (transferred) {
@@ -926,6 +973,9 @@ class ZeroInputService : InputMethodService() {
         }
         activeSession = null
         controller = null
+        editorConnection = null
+        mainHandler.removeCallbacks(reconversionExpiry)
+        reconversionExpiryScheduled = false
         languagePackReloadPending = false
         engineReloadPending = false
         cancelSecureClipboardRequest()
@@ -1055,12 +1105,15 @@ class ZeroInputService : InputMethodService() {
 
     /** Records an interaction and cancels work that was authorized in an
      * older UI state.  All callers run on the IME main thread. */
-    private fun registerInteraction() {
+    private fun registerInteraction(preserveReconversion: Boolean = false) {
+        modelRanking.interaction()
         interactionSequence++
         cancelSecureClipboardRequest()
+        if (!preserveReconversion) controller?.invalidateReconversion()
     }
 
     private fun invalidatePendingPersonalization() {
+        modelRanking.invalidate()
         personalizationWriteGeneration.incrementAndGet()
         graph.personalization.invalidatePendingWrites()
     }
@@ -1071,6 +1124,16 @@ class ZeroInputService : InputMethodService() {
         secureClipboardRequest?.task?.cancel(true)
         BoundedExecutors.purge(secureClipboardExecutor)
         secureClipboardRequest = null
+    }
+
+    private fun modelRankingAllowed(): Boolean = inputViewActive && graph.settings.experimentalModelRanking &&
+        graph.settings.learningEnabled && !graph.settings.incognitoMode &&
+        activeSession?.connectionBinding?.resolve(currentInputConnection) != null &&
+        controller?.state?.let { it.language == InputLanguage.CHINESE && it.languagePackKey == null &&
+            it.privacy.personalizationAllowed && !it.privacy.isSensitive } == true
+
+    private fun refreshModelRanking() {
+        modelRanking.refresh(inputView?.modelRankingSurfaceAvailable == true)
     }
 
     private fun clearSecureClipboardRequest(request: SecureClipboardRequest) {

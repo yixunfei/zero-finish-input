@@ -26,6 +26,7 @@ class KeyboardPanel @JvmOverloads constructor(context: Context, attrs: Attribute
     private var editor = EditorInputOptions()
     private var composing = false
     private var height = KeyboardHeight.STANDARD
+    private var compact = false
     private var geometry = emptyList<List<Float>>()
     private val keys = mutableListOf<KeyboardKeyView>()
     private var radius = 0f
@@ -52,6 +53,13 @@ class KeyboardPanel @JvmOverloads constructor(context: Context, attrs: Attribute
         if (height == value) return
         cancelPendingGestures()
         height = value
+        for (index in 0 until childCount) getChildAt(index).layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, rowHeight())
+    }
+
+    fun setCompactLandscape(value: Boolean) {
+        if (compact == value) return
+        compact = value
+        render()
         for (index in 0 until childCount) getChildAt(index).layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, rowHeight())
     }
 
@@ -85,13 +93,13 @@ class KeyboardPanel @JvmOverloads constructor(context: Context, attrs: Attribute
         render()
     }
 
-    private fun specs(): List<List<KeySpec>> = when (page) {
+    private fun specs(): List<List<KeySpec>> = (when (page) {
         KeyboardPage.LETTERS -> if (keyboardLayout == ChineseKeyboardLayout.NINE_KEY)
             KeyboardLayouts.nineKey(context, languageLabel) else KeyboardLayouts.letters(context, shift != Shift.OFF, languageLabel)
         KeyboardPage.SYMBOLS -> KeyboardLayouts.symbols(context, languageLabel)
         KeyboardPage.MORE_SYMBOLS -> KeyboardLayouts.moreSymbols(context, languageLabel)
         KeyboardPage.NUMERIC -> NumericKeyboardLayout.rows(context, editor)
-    }
+    }).let { if (compact) CompactKeyboardLayout.rows(it) else it }
 
     private fun render() {
         cancelPendingGestures()
@@ -190,7 +198,8 @@ class KeyboardPanel @JvmOverloads constructor(context: Context, attrs: Attribute
     fun cancelPendingGestures() { backspaceRepeater?.cancel(); keys.forEach { it.cancelTouch() } }
     internal val preferredHeight: Int get() = (0 until childCount).sumOf { getChildAt(it).layoutParams.height }
     override fun onDetachedFromWindow() { cancelPendingGestures(); super.onDetachedFromWindow() }
-    private fun rowHeight() = dp(height.rowHeight(resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE))
+    private fun rowHeight() = dp(if (compact) 48 else height.rowHeight(
+        resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE))
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun backgroundColor(style: KeyStyle) = color(when (style) {
         KeyStyle.NORMAL -> com.google.android.material.R.attr.colorSurface

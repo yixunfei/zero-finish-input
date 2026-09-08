@@ -12,6 +12,24 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class QueuedPersonalizationStoreTest {
+    @Test fun `clear immediately invalidates a displayed page before its worker runs`() {
+        val executor = TestExecutorService()
+        val store = QueuedPersonalizationStore(FakeStore(), preload = {}, executor = executor)
+        try {
+            store.suggestionPage("ni", InputLanguage.CHINESE, 0, 8)
+            executor.runNext()
+            store.suggestionPage("ni", InputLanguage.CHINESE, 0, 8)
+            executor.runNext()
+            val displayed = store.suggestionPage("ni", InputLanguage.CHINESE, 0, 8)
+            assertTrue(displayed.items.isNotEmpty())
+            store.clear()
+            val cleared = store.suggestionPage("ni", InputLanguage.CHINESE, 0, 8)
+            assertTrue(cleared.ready)
+            assertTrue(cleared.items.isEmpty())
+            assertTrue(cleared.revision > displayed.revision)
+        } finally { store.close() }
+    }
+
     @Test
     fun `constructor does not read the delegate before personalization is requested`() {
         var preloadCalls = 0

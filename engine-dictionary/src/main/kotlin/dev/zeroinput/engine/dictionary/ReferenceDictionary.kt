@@ -2,25 +2,15 @@ package dev.zeroinput.engine.dictionary
 
 import java.util.TreeMap
 
-internal class ReferenceDictionary private constructor(private val entries: TreeMap<String, List<String>>) {
+internal class ReferenceDictionary private constructor(private val prefixes: Map<String, List<String>>) {
     fun lookup(input: String): List<String> {
         if (input.isEmpty()) return emptyList()
         val prefix = input.replace("'", "")
         if (prefix.isEmpty()) return emptyList()
-        val results = LinkedHashSet<String>()
-        for ((key, values) in entries.tailMap(prefix)) {
-            if (!key.startsWith(prefix)) break
-            for (value in values) {
-                results += value
-                if (results.size == MAX_RESULTS) return results.toList()
-            }
-        }
-        return results.toList()
+        return prefixes[prefix].orEmpty()
     }
 
     companion object {
-        private const val MAX_RESULTS = 64
-
         fun load(): ReferenceDictionary {
             val stream = checkNotNull(ReferenceDictionary::class.java.getResourceAsStream("/reference-pinyin.tsv")) {
                 "Reference dictionary is missing"
@@ -39,7 +29,12 @@ internal class ReferenceDictionary private constructor(private val entries: Tree
                 }
             }
             check(entries.isNotEmpty()) { "Reference dictionary is empty" }
-            return ReferenceDictionary(TreeMap(entries.mapValues { it.value.toList() }))
+            // The bounded bundled reference fixture is indexed once on its factory worker.
+            val prefixes = HashMap<String, LinkedHashSet<String>>()
+            for ((reading, values) in entries) for (length in 1..reading.length) {
+                prefixes.getOrPut(reading.take(length)) { LinkedHashSet() }.addAll(values)
+            }
+            return ReferenceDictionary(prefixes.mapValues { it.value.toList() })
         }
     }
 }

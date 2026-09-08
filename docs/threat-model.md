@@ -47,6 +47,26 @@
 
 ## Input configuration and interaction controls
 
+- Explicit last-word reselection retains at most one 128-unit Chinese draft in
+  mutable buffers, within the current session. Another edit, cursor/selection
+  change, settings/session invalidation, destruction or the 30-second timeout
+  clears it. Reopening requires the original connection, acknowledged collapsed
+  selection, no current composing region and exact preceding text. The adapter
+  uses `setComposingRegion`; it never independently deletes an assumed word.
+  Uncooperative editors fail closed. Android offers no atomic cross-process
+  compare-and-replace, so a malicious editor is outside this guarantee.
+- Candidate history is bounded and selection verifies the restored page before
+  submission. Personal pagination stays on the existing generation-checked
+  encrypted worker; a changed data revision discards retained pages even if the
+  replacement query is pending. Clear makes unavailable pages ready-empty
+  immediately, before its worker executes. A fixed partial phrase suppresses whole-input personal
+  overlays, preventing a candidate from unexpectedly replacing chosen segments.
+- Default-off typo rules and related-reading enumeration use only public Rime
+  resources. Temporary alternate input belongs to an isolated session and is
+  cleared on reset/close. No coordinates, key history, model context, private
+  training corpus or new permission is persisted. Canonical reading metadata
+  prevents learning corrected output under the misspelled input.
+
 - Chinese preferences are immutable snapshots included in warm-up identity.
   Changing options invalidates old preparation results and authenticated actions.
   Adopting a prepared engine also cancels pending authenticated actions before
@@ -181,6 +201,11 @@
   use synthetic metadata or a single fixed public fixture, skipping platform
   mutation when existing clipboard metadata is present. No real clipboard body
   is read or included in tests, snapshots or diagnostics. See ADR 0007.
+- Platform mutation tests establish a visible, real ZeroInput IME before enabling
+  monitoring or writing their public fixture. Bounded input reconnection requests
+  exist only in the test driver; they do not bypass the production service lease.
+  Regressions verify that an unattached service cannot subscribe and that cancelling
+  confirmation or disabling monitoring preserves the current public fixture.
 
 ## Optional application overlay
 
@@ -243,6 +268,30 @@ layout selection uses public EditorInfo flags and does not relax the conservativ
 privacy policy for passwords, PIN or unknown editor variants. Rendering fixtures
 are nonexported Debug components; screenshots contain only constructed public
 content. No new permission, network dependency or personal-data format is added.
+
+## Experimental model context
+
+The default-off short-word scorer adds at most 16 transient Chinese characters
+successfully committed by this IME in the current editor. It never queries the
+editor, clipboard or stored personal history for context. Sensitive, unknown,
+identifier, incognito and learning-disabled policies reject context and scoring.
+Private snippet and emoji entry paths invalidate context before direct commits.
+
+One bounded worker receives owned character buffers, later replaced by token IDs.
+Session/view/settings/cursor/reconversion/privacy changes revoke generations,
+wipe pending buffers and clear context. Running inference may finish its bounded
+16-row workload, then wipes inputs and discards stale outputs. Only revision and
+winner index reach a coalesced main-thread delivery; core rechecks eligibility and
+candidate routes. User browsing and held touches suppress promotion. No context,
+candidate, score or token ID is logged, saved, backed up or sent off-device.
+
+The native session and tensors are explicitly closed. Application buffers are
+wiped; the third-party allocator does not provide a verifiable erasure contract
+for every internal temporary copy. This is a process-memory limitation, not a
+disk cache. Only the fixed public model is copied to noBackupFilesDir. Source,
+graph, vocabulary and runtime are pinned; size/hash checks precede activation.
+Malformed/missing assets and runtime errors keep baseline input working. No new
+permission, component, network path or personal-data format is introduced.
 
 ## Out of scope
 

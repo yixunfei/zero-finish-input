@@ -16,6 +16,8 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
     var onExpandRequested: () -> Unit = {}
     var onRetryRequested: () -> Unit = {}
     var onToolsRequested: () -> Unit = {}
+    var onUndoSelectionRequested: () -> Unit = {}
+    var onSyllableRequested: () -> Unit = {}
     private val composition = TextView(context).apply {
         textSize = 14f
         gravity = Gravity.CENTER_VERTICAL
@@ -38,6 +40,8 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
     }
     private val expand = panelIconButton(context, android.R.drawable.arrow_down_float, R.string.expand_candidates) { onExpandRequested() }
     private val tools = panelIconButton(context, R.drawable.ic_keyboard_tools, R.string.keyboard_tools) { onToolsRequested() }
+    private val undo = panelIconButton(context, android.R.drawable.ic_menu_revert, R.string.undo_segment) { onUndoSelectionRequested() }
+    private val syllable = panelIconButton(context, android.R.drawable.ic_menu_edit, R.string.select_single_syllable) { onSyllableRequested() }
     private val retry = panelIconButton(context, android.R.drawable.ic_popup_sync, R.string.retry_engine) { onRetryRequested() }
     private val buttons = mutableListOf<CandidateItemView>()
     private var previousSnapshot: EngineSnapshot? = null
@@ -57,11 +61,15 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
         addView(statusRow, if (landscape) LayoutParams(0, dp(48), 1f) else LayoutParams(LayoutParams.MATCH_PARENT, dp(24)))
         addView(LinearLayout(context).apply {
             addView(tools, LayoutParams(dp(48), dp(48)))
+            addView(undo, LayoutParams(dp(48), dp(48)))
+            addView(syllable, LayoutParams(dp(48), dp(48)))
             addView(scroll, LayoutParams(0, dp(48), 1f))
             addView(retry, LayoutParams(dp(48), dp(48)))
             addView(expand, LayoutParams(dp(48), dp(48)))
         }, if (landscape) LayoutParams(0, dp(48), 3f) else LayoutParams(LayoutParams.MATCH_PARENT, dp(48)))
         renderStatus(InputEngineStatus.HIDDEN)
+        undo.visibility = GONE
+        syllable.visibility = GONE
     }
 
     fun render(snapshot: EngineSnapshot) {
@@ -69,6 +77,8 @@ class CandidateStripView @JvmOverloads constructor(context: Context, attrs: Attr
         val changedInput = snapshot.rawInput != previousSnapshot?.rawInput ||
             snapshot.candidates != previousSnapshot?.candidates
         previousSnapshot = snapshot
+        undo.visibility = if (snapshot.canUndoSelection) VISIBLE else GONE
+        syllable.visibility = if (snapshot.canSelectSyllable && !snapshot.canUndoSelection) VISIBLE else GONE
         composition.text = snapshot.composition.ifEmpty { snapshot.rawInput }
         while (buttons.size < snapshot.candidates.size) {
             buttons += CandidateItemView(context).also { button ->

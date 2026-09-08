@@ -21,6 +21,9 @@ public final class ExternalClipboardFixture extends Activity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(null);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
         TextView text = new TextView(this);
         text.setId(View.generateViewId());
         text.setText("public guard fixture", TextView.BufferType.SPANNABLE);
@@ -43,6 +46,7 @@ public final class ExternalClipboardFixture extends Activity {
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(32, 80, 32, 32);
+        applySystemInsets(content);
         content.addView(text);
         content.addView(button("Select public text", () -> {
             text.requestFocus();
@@ -65,6 +69,21 @@ public final class ExternalClipboardFixture extends Activity {
         content.addView(selectionStatus);
         content.addView(focusStatus);
         setContentView(content);
+    }
+
+    @SuppressWarnings("deprecation")
+    private void applySystemInsets(View content) {
+        content.setOnApplyWindowInsetsListener((view, insets) -> {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                android.graphics.Insets safe = insets.getInsets(
+                    android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+                view.setPadding(32 + safe.left, 80 + safe.top, 32 + safe.right, 32 + safe.bottom);
+            } else {
+                view.setPadding(32 + insets.getSystemWindowInsetLeft(), 80 + insets.getSystemWindowInsetTop(),
+                    32 + insets.getSystemWindowInsetRight(), 32 + insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
     }
 
     @Override

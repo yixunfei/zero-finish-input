@@ -14,6 +14,7 @@ import dev.zeroinput.engine.api.ChineseInputOptions
 import dev.zeroinput.engine.api.ChineseScript
 import dev.zeroinput.engine.api.EngineCapability
 import dev.zeroinput.engine.api.ReadingSelectionEngine
+import dev.zeroinput.engine.api.CompositionEditingEngine
 
 internal class RimeInputEngine(
     schemaId: String = "zeroinput_pinyin",
@@ -21,13 +22,17 @@ internal class RimeInputEngine(
     private val onNativeFailure: (Throwable) -> Unit = {},
     private val onClosed: () -> Unit = {},
     private val nineKeyReadings: NineKeyReadings? = null,
-) : InputEngine, CandidateTextNormalizer, ReadingSelectionEngine {
+) : InputEngine, CandidateTextNormalizer, ReadingSelectionEngine, CompositionEditingEngine {
     private var sessionId = NativeRimeBridge.nativeCreateSession(schemaId).also {
         check(it != 0L) { "Unable to create a Rime session" }
     }
     private var currentSnapshot = EngineSnapshot.Empty
     private var hasFixedSelection = false
     private val readingHistory = ArrayDeque<Pair<String, String>>()
+    private val selectedIndices = mutableListOf<SelectedSegment>()
+    private var selectedInput = ""
+    private var pageNumber = 0
+    private var caretPosition = 0
 
     override val descriptor = Descriptor
 
@@ -39,11 +44,21 @@ internal class RimeInputEngine(
         NativeRimeBridge.nativeClearComposition(sessionId)
         hasFixedSelection = false
         readingHistory.clear()
+        clearSelectionHistory()
         readUpdate(false)
         currentSnapshot
     }
 
     override fun handle(key: EngineKey): EngineUpdate = nativeCall {
+        if (key == EngineKey.Space && currentSnapshot.candidates.isNotEmpty()) {
+            return selectCandidate(currentSnapshot.highlightedIndex)
+        }
+        val input = currentSnapshot.rawInput
+        if (input.length >= 128 && key is EngineKey.Character && key.text.any { it.isLetter() || it == '\'' }) {
+            return EngineUpdate(currentSnapshot, consumed = false)
+        }
+        val reading = committedReading(currentSnapshot.highlightedIndex)
+        if (key == EngineKey.Backspace && selectedIndices.isNotEmpty() && input == selectedInput) return undoSelection()
         if (key == EngineKey.Backspace) {
             val previous = readingHistory.lastOrNull()
             if (previous != null && currentSnapshot.rawInput == previous.second) {
@@ -60,17 +75,73 @@ internal class RimeInputEngine(
             EngineKey.Enter -> KEY_RETURN to 0
         }
         val consumed = NativeRimeBridge.nativeProcessKey(sessionId, keyCode, modifiers)
-        readUpdate(consumed)
+        readUpdate(consumed).copy(committedInput = reading.ifBlank { input }, learnable = reading.isNotEmpty())
     }
 
     override fun selectCandidate(index: Int): EngineUpdate = nativeCall {
-        val consumed = NativeRimeBridge.nativeSelectCandidate(sessionId, index)
+        if (index !in currentSnapshot.candidates.indices) return EngineUpdate(currentSnapshot, consumed = false)
+        val input = currentSnapshot.rawInput
+        val absoluteIndex = pageNumber * options.candidatePageSize + index
+        val reading = committedReading(index)
+        val segment = SelectedSegment(absoluteIndex, caretPosition, canonicalReading(currentSnapshot.candidates[index].comment))
+        val consumed = NativeRimeBridge.nativeSelectAbsoluteCandidate(sessionId, absoluteIndex)
         if (consumed) {
             hasFixedSelection = true
             readingHistory.clear()
+            selectedInput = input
+            if (selectedIndices.size < 64) selectedIndices += segment else clearSelectionHistory()
         }
+        readUpdate(consumed).copy(committedInput = reading.ifBlank { input }, learnable = reading.isNotEmpty())
+    }
+
+    override fun restoreComposition(input: String): EngineUpdate = nativeCall {
+        if (input.isEmpty() || input.length > 128) return EngineUpdate(currentSnapshot, consumed = false)
+        val consumed = NativeRimeBridge.nativeSetInput(sessionId, input)
+        clearSelectionHistory()
+        readingHistory.clear()
+        hasFixedSelection = false
         readUpdate(consumed)
     }
+
+    override fun undoSelection(): EngineUpdate = nativeCall {
+        if (selectedIndices.isEmpty()) return EngineUpdate(currentSnapshot, consumed = false)
+        selectedIndices.removeAt(selectedIndices.lastIndex)
+        val input = currentSnapshot.rawInput
+        NativeRimeBridge.nativeClearComposition(sessionId)
+        NativeRimeBridge.nativeSetInput(sessionId, input)
+        for (step in selectedIndices) {
+            if (!NativeRimeBridge.nativeSetCaret(sessionId, step.caret) ||
+                !NativeRimeBridge.nativeSelectAbsoluteCandidate(sessionId, step.index)) {
+                NativeRimeBridge.nativeClearComposition(sessionId)
+                NativeRimeBridge.nativeSetInput(sessionId, input)
+                clearSelectionHistory()
+                break
+            }
+        }
+        hasFixedSelection = selectedIndices.isNotEmpty()
+        readingHistory.clear()
+        readUpdate(true)
+    }
+
+    override fun selectSyllable(): EngineUpdate = nativeCall {
+        if (!currentSnapshot.isComposing) return EngineUpdate(currentSnapshot, consumed = false)
+        NativeRimeBridge.nativeProcessKey(sessionId, KEY_END, 0)
+        val consumed = NativeRimeBridge.nativeProcessKey(sessionId, KEY_RIGHT, CONTROL_MASK)
+        readUpdate(consumed)
+    }
+
+    private fun committedReading(index: Int): String {
+        val suffix = currentSnapshot.candidates.getOrNull(index)?.comment?.let(::canonicalReading).orEmpty()
+        if (suffix.isEmpty() || selectedIndices.any { it.reading.isEmpty() }) return ""
+        return selectedIndices.joinToString("") { it.reading } + suffix
+    }
+
+    private fun canonicalReading(value: String): String = value.filterNot { it == ' ' || it == '\'' }
+        .takeIf { it.isNotEmpty() && it.length <= 128 && it.all { ch -> ch in 'a'..'z' } }.orEmpty()
+
+    private data class SelectedSegment(val index: Int, val caret: Int, val reading: String)
+
+    private fun clearSelectionHistory() { selectedIndices.clear(); selectedInput = "" }
 
     override fun selectReading(index: Int): EngineUpdate = nativeCall {
         val reading = currentSnapshot.readings.getOrNull(index) ?: return EngineUpdate(currentSnapshot, consumed = false)
@@ -93,10 +164,23 @@ internal class RimeInputEngine(
         readUpdate(consumed)
     }
 
+    internal fun browsePage(page: Int): EngineUpdate = nativeCall {
+        if (page < 0) return EngineUpdate(currentSnapshot, consumed = false)
+        val result = NativeRimeBridge.nativeCandidatePage(sessionId, page, options.candidatePageSize)
+        if (result.texts.isEmpty()) return EngineUpdate(currentSnapshot, consumed = false)
+        pageNumber = page
+        currentSnapshot = currentSnapshot.copy(candidates = result.texts.mapIndexed { index, text ->
+            val comment = result.comments.getOrElse(index) { "" }
+            Candidate("rime:$index:$text", text, comment, input = canonicalReading(comment))
+        }, highlightedIndex = 0, hasPreviousPage = page > 0, hasNextPage = result.hasNext)
+        EngineUpdate(currentSnapshot)
+    }
+
     override fun reset(): EngineSnapshot = nativeCall {
         NativeRimeBridge.nativeClearComposition(sessionId)
         hasFixedSelection = false
         readingHistory.clear()
+        clearSelectionHistory()
         currentSnapshot = EngineSnapshot.Empty
         currentSnapshot
     }
@@ -107,6 +191,7 @@ internal class RimeInputEngine(
         currentSnapshot = EngineSnapshot.Empty
         if (id != 0L) {
             readingHistory.clear()
+            clearSelectionHistory()
             try {
                 NativeRimeBridge.nativeDestroySession(id)
             } finally {
@@ -121,20 +206,26 @@ internal class RimeInputEngine(
 
     private fun readUpdate(consumed: Boolean): EngineUpdate {
         val update = NativeRimeBridge.nativeReadUpdate(sessionId)
+        pageNumber = update.pageNumber
+        caretPosition = update.caretPosition
         if (update.rawInput.isEmpty()) {
             hasFixedSelection = false
             readingHistory.clear()
+            clearSelectionHistory()
         }
         currentSnapshot = EngineSnapshot(
             rawInput = update.rawInput,
             composition = update.composition,
             candidates = update.candidates.mapIndexed { index, text ->
-                Candidate("rime:$index:$text", text, update.comments.getOrElse(index) { "" })
+                val comment = update.comments.getOrElse(index) { "" }
+                Candidate("rime:$index:$text", text, comment, input = canonicalReading(comment))
             },
             highlightedIndex = update.highlightedIndex,
             hasPreviousPage = update.candidates.isNotEmpty() && update.pageNumber > 0,
             hasNextPage = update.candidates.isNotEmpty() && !update.lastPage,
             readings = if (hasFixedSelection) emptyList() else nineKeyReadings?.choices(update.rawInput, update.comments.toList()).orEmpty(),
+            canUndoSelection = selectedIndices.isNotEmpty(),
+            canSelectSyllable = update.rawInput.isNotEmpty(),
         )
         return EngineUpdate(currentSnapshot, update.committedText, consumed || update.committedText.isNotEmpty())
     }
@@ -150,6 +241,9 @@ internal class RimeInputEngine(
         const val KEY_BACKSPACE = 0xff08
         const val KEY_RETURN = 0xff0d
         const val KEY_SPACE = 0x20
+        const val KEY_END = 0xff57
+        const val KEY_RIGHT = 0xff53
+        const val CONTROL_MASK = 4
 
         val Descriptor = EngineDescriptor(
             id = "rime.luna-pinyin",
@@ -158,7 +252,7 @@ internal class RimeInputEngine(
             languages = setOf(InputLanguage.CHINESE),
             capabilities = setOf(EngineCapability.CHINESE_SCRIPT, EngineCapability.ABBREVIATED_PINYIN,
                 EngineCapability.FUZZY_PINYIN, EngineCapability.PUNCTUATION_MODE, EngineCapability.CANDIDATE_PAGE_SIZE,
-                EngineCapability.NINE_KEY_PINYIN),
+                EngineCapability.NINE_KEY_PINYIN, EngineCapability.TYPO_CORRECTION, EngineCapability.SEGMENT_SELECTION),
         )
     }
 }

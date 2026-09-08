@@ -14,6 +14,11 @@ sealed interface InputCommand {
 
     data object Enter : InputCommand
 
+    data object ReconvertLast : InputCommand
+
+    data object UndoSelection : InputCommand
+    data object SelectSyllable : InputCommand
+
     data class SelectCandidate(val visibleIndex: Int) : InputCommand
 
     data class SelectReading(val index: Int) : InputCommand

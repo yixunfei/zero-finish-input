@@ -18,9 +18,10 @@
   },
   "translator": {
     "dictionary": "luna_pinyin", "prism": "zeroinput_pinyin",
-    "enable_completion": true, "enable_sentence": true, "enable_user_dict": false
+    "enable_completion": true, "enable_sentence": true, "enable_user_dict": false,
+    "always_show_comments": true, "spelling_hints": 64
   },
-  "simplifier": {"opencc_config": "t2s.json", "tips": "none"},
+  "simplifier": {"opencc_config": "t2s.json", "tips": "none", "inherit_comment": true},
   "menu": {"page_size": 8},
   "editor": {"bindings": {"Return": "commit_composition"}},
   "punctuator": {

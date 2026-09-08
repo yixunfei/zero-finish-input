@@ -17,10 +17,11 @@ class ClipboardExternalImportTest {
             Device.longPressPublicText()
             try {
                 Device.await { Device.findText("Native ZeroInput text action available") != null }
-            } catch (_: AssertionError) {
+            } catch (failure: AssertionError) {
                 val statuses = listOf("Native ZeroInput text action unavailable", "Native selection ended",
                     "Native selection requested", "Native selection rejected", "Source ready", "Source inactive")
-                throw AssertionError(statuses.filter { Device.findText(it) != null }.joinToString())
+                val visible = statuses.filter { Device.findText(it) != null }
+                throw AssertionError(visible.joinToString().ifEmpty { "Public source status is no longer visible" }, failure)
             }
         } finally { closeSource() }
     }

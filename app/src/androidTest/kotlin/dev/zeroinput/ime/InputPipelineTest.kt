@@ -66,6 +66,7 @@ class InputPipelineTest {
             report("editor", editorTimes)
             report("frame", frames)
             verifyBurst(panel, activity, "nihao".map(Char::toString), "rime-full")
+            verifyReconversion(panel, activity)
             onMain { panel.onLayoutSwitchRequested() }
             awaitReady(panel)
             instrumentation.waitForIdleSync()
@@ -112,6 +113,28 @@ class InputPipelineTest {
         assertTrue("A fixture key must reach the editor", edited.await(2, TimeUnit.SECONDS))
         assertTrue("A fixture key must reach a frame", framed.await(2, TimeUnit.SECONDS))
         onMain { activity.editor.removeTextChangedListener(watcher) }
+    }
+
+    private fun verifyReconversion(panel: ZeroInputView, activity: InputFixtureActivity) {
+        var expected = ""
+        onMain {
+            expected = activity.editor.text.toString() + "你好"
+            "nihao".forEach { sendKey(panel, it.toString()) }
+            sendKey(panel, "↵")
+        }
+        instrumentation.waitForIdleSync()
+        onMain {
+            assertTrue(activity.editor.text.toString() == expected)
+            val label = panel.context.getString(dev.zeroinput.ime.ui.R.string.reconvert_last_word)
+            descendants(panel).first { it.isShown && it.contentDescription == label }.performClick()
+        }
+        instrumentation.waitForIdleSync()
+        onMain {
+            assertTrue(android.view.inputmethod.BaseInputConnection.getComposingSpanStart(activity.editor.text) == expected.length - 2)
+            sendKey(panel, "↵")
+        }
+        instrumentation.waitForIdleSync()
+        onMain { assertTrue(activity.editor.text.toString() == expected) }
     }
 
     private fun verifyBurst(panel: ZeroInputView, activity: InputFixtureActivity, labels: List<String>, phase: String) {

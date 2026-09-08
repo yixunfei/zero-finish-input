@@ -26,7 +26,11 @@ data class Candidate(
     val text: String,
     val comment: String = "",
     val score: Int = 0,
+    val input: String = "",
+    val kind: CandidateKind = CandidateKind.STANDARD,
 )
+
+enum class CandidateKind { STANDARD, RELATED_READING }
 
 data class EngineSnapshot(
     val rawInput: String = "",
@@ -36,6 +40,8 @@ data class EngineSnapshot(
     val hasPreviousPage: Boolean = false,
     val hasNextPage: Boolean = false,
     val readings: List<String> = emptyList(),
+    val canUndoSelection: Boolean = false,
+    val canSelectSyllable: Boolean = false,
 ) {
     val isComposing: Boolean
         get() = rawInput.isNotEmpty() || composition.isNotEmpty()
@@ -49,6 +55,8 @@ data class EngineUpdate(
     val snapshot: EngineSnapshot,
     val committedText: String = "",
     val consumed: Boolean = true,
+    val committedInput: String = "",
+    val learnable: Boolean = true,
 )
 
 sealed interface EngineKey {

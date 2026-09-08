@@ -42,6 +42,6 @@ internal class RimeAssetInstaller(
 
     private companion object {
         const val ASSET_ROOT = "rime"
-        const val ASSET_VERSION = "4"
+        const val ASSET_VERSION = "5"
     }
 }

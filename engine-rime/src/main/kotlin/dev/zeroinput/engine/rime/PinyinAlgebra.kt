@@ -7,6 +7,9 @@ import dev.zeroinput.engine.api.ChineseKeyboardLayout
 /** Rime compiles these rules into its syllable index, outside the input thread. */
 internal object PinyinAlgebra {
     fun rules(options: ChineseInputOptions): List<String> = buildList {
+        if (options.experimentalTypoCorrection && options.keyboardLayout == ChineseKeyboardLayout.FULL) {
+            addAll(TypoPinyinAlgebra.rules())
+        }
         for (pair in FuzzyPinyinPair.entries) {
             if (options.isFuzzyEnabled(pair)) addAll(fuzzyRules.getValue(pair))
         }
@@ -25,11 +28,12 @@ internal object PinyinAlgebra {
 
     fun schemaId(options: ChineseInputOptions): String =
         if (options.fuzzyPinyinMask == 0 && options.abbreviatedPinyin && options.candidatePageSize == 8 &&
-            options.keyboardLayout == ChineseKeyboardLayout.FULL) {
+            options.keyboardLayout == ChineseKeyboardLayout.FULL && !options.experimentalTypoCorrection) {
             "zeroinput_pinyin"
         } else {
             "zeroinput_pinyin_${options.fuzzyPinyinMask}_${if (options.abbreviatedPinyin) 1 else 0}_${options.candidatePageSize}" +
-                if (options.keyboardLayout == ChineseKeyboardLayout.NINE_KEY) "_9" else ""
+                (if (options.keyboardLayout == ChineseKeyboardLayout.NINE_KEY) "_9" else "") +
+                (if (options.experimentalTypoCorrection && options.keyboardLayout == ChineseKeyboardLayout.FULL) "_2" else "")
         }
 
     private val fuzzyRules = mapOf(

@@ -15,6 +15,7 @@ app -> ime-core --------> engine-api
  +-> engine-english -------+
  +-> engine-rime ----------+
  +-> engine-dictionary ----+
+ +-> model-scoring --------+
  +-> user-data ------------+
  +-> language-pack -----> engine-api
 
@@ -25,6 +26,16 @@ language-pack -> security
 业务层不引用 librime 类型。升级、替换或移除 librime 时，变化限制在 `engine-rime` 模块和语言数据部署器内。
 
 ## Runtime boundaries
+
+Composition editing and candidate continuation are described in
+[ADR 0010](adr/0010-composition-editing-and-candidate-continuation.md).
+The optional engine editing port keeps segment selection/undo in engines;
+canonical commit readings flow through the existing encrypted learning port.
+The core owns a six-page candidate window and one bounded recent-word draft.
+Only the Android adapter verifies and reopens an editor composing region.
+Rime prepares a secondary shared-dictionary session for related full-keyboard
+readings; nine-key retains its original native flow. Personal query pages are
+prepared on the existing serial worker and never decrypt on key dispatch.
 
 1. `ZeroInputService` 是唯一输入法服务并持有当前输入会话。每个会话都有单调递增的令牌，
    安全剪贴板认证请求同时绑定令牌、原始 `InputConnection` 和发起时的交互序号；任一项变化都会
@@ -210,6 +221,15 @@ clears the previous span. The engine API and synchronous ownership of editor
 mutations remain unchanged.
 
 ## Engine compatibility
+
+The optional `model-scoring` module depends only on `engine-api` and the pinned
+offline ONNX Runtime. `app` composes it through `CandidateScorer`; Rime/JNI never
+owns the model. `ime-core/ModelRankingPolicy` and controller revisions preserve
+candidate identity and routing. The app coordinator owns successful-commit context
+and UI/privacy lifecycle; `AsyncCandidateRanker` owns one lazy worker, one pending
+request and a coalesced content-free delivery. Disabled input creates no model
+or worker. See [ADR 0011](adr/0011-experimental-model-ranking.md) and
+[model integration](model-integration.md).
 
 Rime remains the default Chinese engine. `engine-dictionary` is a separate JVM
 module with a small bundled Apache-2.0 reference dictionary and bounded prefix

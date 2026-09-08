@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="experimental_model_ranking">短词智能排序（实验）</string>
+    <string name="experimental_model_help">根据本次输入的中文调整两字词顺序，全程离线。可能误改首选词，也会增加内存和耗电；默认关闭，隐私模式下停用。</string>
+    <string name="experimental_typo_correction">防误触纠错（实验）</string>
+    <string name="experimental_typo_help">仅用于26键，可能增加候选干扰和耗电。</string>
     <string name="clipboard_guard_title">系统剪贴板防护</string>
     <string name="clipboard_guard_limit">该功能只是尽量缩短误复制内容在系统剪贴板中的停留时间，并帮助用户清理；无法阻止写入瞬间的访问，默认不开启。\n\n仅在选用 ZeroInput 且输入法服务运行、系统允许回调时生效；可能漏报，无法判断是否误复制。</string>
     <string name="clipboard_guard_listen">监听系统剪贴板变化</string>

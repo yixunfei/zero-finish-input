@@ -34,13 +34,18 @@ internal object NativeRimeBridge {
 
     external fun nativeReadUpdate(sessionId: Long): NativeRimeUpdate
 
+    external fun nativeCandidatePage(sessionId: Long, page: Int, size: Int): NativeCandidatePage
+
     external fun nativeSelectCandidate(sessionId: Long, index: Int): Boolean
+
+    external fun nativeSelectAbsoluteCandidate(sessionId: Long, index: Int): Boolean
 
     external fun nativeChangePage(sessionId: Long, backwards: Boolean): Boolean
 
     external fun nativeClearComposition(sessionId: Long)
 
     external fun nativeSetInput(sessionId: Long, input: String): Boolean
+    external fun nativeSetCaret(sessionId: Long, position: Int): Boolean
 
     external fun nativeVersion(): String
 }

@@ -10,4 +10,5 @@ internal class NativeRimeUpdate(
     val pageNumber: Int,
     val lastPage: Boolean,
     val highlightedIndex: Int,
+    val caretPosition: Int,
 )

@@ -3,6 +3,8 @@ package dev.zeroinput.ime.personalization
 import dev.zeroinput.engine.api.InputLanguage
 import dev.zeroinput.engine.api.PersonalSuggestion
 import dev.zeroinput.engine.api.PersonalizationStore
+import dev.zeroinput.engine.api.PagedPersonalizationStore
+import dev.zeroinput.engine.api.PersonalSuggestionPage
 import dev.zeroinput.ime.concurrency.BoundedExecutors
 import java.util.LinkedHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -19,22 +21,23 @@ internal class QueuedPersonalizationStore(
         name = "zeroinput-personalization",
         queueCapacity = MAX_PENDING_OPERATIONS,
     ),
-) : PersonalizationStore, AutoCloseable {
+) : PagedPersonalizationStore, AutoCloseable {
     private val closed = AtomicBoolean(false)
     private val generation = AtomicLong(0L)
     private val dataRevision = AtomicLong(0L)
+    private val viewRevision = AtomicLong(0L)
     @Volatile
     private var ready = false
     private val stateLock = Any()
     private val submissionLock = Any()
     private val delegateLock = Any()
-    private val suggestionCache = object : LinkedHashMap<QueryKey, List<PersonalSuggestion>>(
+    private val suggestionCache = object : LinkedHashMap<QueryKey, PersonalSuggestionPage>(
         MAX_CACHED_QUERIES,
         0.75f,
         true,
     ) {
         override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<QueryKey, List<PersonalSuggestion>>?,
+            eldest: MutableMap.MutableEntry<QueryKey, PersonalSuggestionPage>?,
         ): Boolean = size > MAX_CACHED_QUERIES
     }
     private val pendingQueries = HashMap<QueryKey, QueryStamp>()
@@ -45,23 +48,29 @@ internal class QueuedPersonalizationStore(
         prefix: String,
         language: InputLanguage,
         limit: Int,
-    ): List<PersonalSuggestion> {
+    ): List<PersonalSuggestion> = suggestionPage(prefix, language, 0, limit).items
+
+    override fun suggestionPage(prefix: String, language: InputLanguage, offset: Int, limit: Int): PersonalSuggestionPage {
         require(limit in 0..MAX_SUGGESTION_LIMIT)
+        require(offset in 0..20000)
         val normalized = prefix.trim().lowercase()
-        if (normalized.isEmpty() || limit == 0 || closed.get()) return emptyList()
+        if (normalized.isEmpty() || limit == 0 || closed.get()) return PersonalSuggestionPage(revision = viewRevision.get())
 
         schedulePreload()
-        if (!ready) return emptyList()
+        // Unavailable/cleared data must erase the display immediately. Only a
+        // cache miss within the same ready revision may preserve a visible page.
+        if (!ready) return PersonalSuggestionPage(revision = viewRevision.get())
 
-        val key = QueryKey(normalized, language)
-        val cached = synchronized(stateLock) { suggestionCache[key] }
-        if (cached != null) return cached.take(limit)
+        val key = QueryKey(normalized, language, offset)
+        val (cached, revision) = synchronized(stateLock) { suggestionCache[key] to viewRevision.get() }
+        if (cached != null) return cached.copy(items = cached.items.take(limit),
+            hasMore = cached.hasMore || cached.items.size > limit, revision = revision)
 
         // A cache miss is deliberately non-blocking. The delegate may still
         // touch encrypted storage or sort a large dictionary, so never call
         // it from the IME key path.
         scheduleSuggestionQuery(key, dataRevision.get())
-        return emptyList()
+        return PersonalSuggestionPage(ready = false, revision = revision)
     }
 
     override fun learn(
@@ -304,13 +313,15 @@ internal class QueuedPersonalizationStore(
                     if (isQueryCurrent(queryGeneration, queryRevision)) {
                         val values = runCatching {
                             withDelegate {
-                                delegate.suggestionsFor(
+                                (delegate as? PagedPersonalizationStore)?.suggestionPage(
+                                    key.prefix, key.language, key.offset, MAX_SUGGESTION_LIMIT,
+                                ) ?: PersonalSuggestionPage(if (key.offset == 0) delegate.suggestionsFor(
                                     key.prefix,
                                     key.language,
                                     MAX_SUGGESTION_LIMIT,
-                                )
+                                ) else emptyList())
                             }
-                        }.getOrDefault(emptyList()).toList()
+                        }.getOrDefault(PersonalSuggestionPage())
                         synchronized(stateLock) {
                             if (isQueryCurrent(queryGeneration, queryRevision)) {
                                 suggestionCache[key] = values
@@ -349,6 +360,7 @@ internal class QueuedPersonalizationStore(
 
     private fun invalidateSuggestionCache(clearPending: Boolean = false) {
         synchronized(stateLock) {
+            viewRevision.incrementAndGet()
             suggestionCache.clear()
             if (clearPending) pendingQueries.clear()
         }
@@ -357,6 +369,7 @@ internal class QueuedPersonalizationStore(
     private data class QueryKey(
         val prefix: String,
         val language: InputLanguage,
+        val offset: Int,
     )
 
     private data class QueryStamp(

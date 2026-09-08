@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Serial)
+param([string]$Serial, [string]$TestClass)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -51,8 +51,10 @@ try {
             Invoke-Adb @("shell", "ime", "set", $alternate.Trim())
             $changedMethod = $true
         }
-        $result = Invoke-Adb @("shell", "am", "instrument", "-w",
-            "dev.zeroinput.ime.debug.test/androidx.test.runner.AndroidJUnitRunner")
+        $instrumentArguments = @("shell", "am", "instrument", "-w")
+        if ($TestClass) { $instrumentArguments += @("-e", "class", $TestClass) }
+        $instrumentArguments += "dev.zeroinput.ime.debug.test/androidx.test.runner.AndroidJUnitRunner"
+        $result = Invoke-Adb $instrumentArguments
         $result | Write-Output
         if (($result -join "`n") -notmatch 'OK \(\d+ tests?\)' -or ($result -join "`n") -match 'FAILURES!!!') {
             throw "Device regression tests failed."

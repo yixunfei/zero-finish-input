@@ -68,7 +68,14 @@ class InputPanelTest {
         assertTrue(pageRequests == 1)
         visible(panel).last { it.contentDescription == panel.context.getString(dev.zeroinput.ime.ui.R.string.candidate_description, "你好") }.performClick()
         assertTrue(selection >= 0)
-        panel.renderSession(InputSessionState())
+        var interactions = 0
+        panel.onUserInteraction = { interactions++ }
+        panel.renderSession(InputSessionState(canReconvert = true))
+        assertTrue("Automatic return to keyboard must preserve the recent word", interactions == 0)
+        var reopened = false
+        panel.onReconvertRequested = { reopened = true }
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.reconvert_last_word)).performClick()
+        assertTrue(reopened)
         assertTrue(visible(panel).any { it is KeyboardPanel })
         assertFalse(visible(panel).any { it.contentDescription == panel.context.getString(dev.zeroinput.ime.ui.R.string.candidate_description, "你好") })
     }

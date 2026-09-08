@@ -2,30 +2,42 @@ package dev.zeroinput.ime.ui
 
 import android.content.Context
 import android.view.Gravity
-import android.view.View
-import android.widget.GridLayout
+import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.Space
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.DiffUtil
+import dev.zeroinput.engine.api.Candidate
 import dev.zeroinput.engine.api.EngineSnapshot
 import dev.zeroinput.engine.api.PageDirection
 
 internal class ExpandedCandidatesView(context: Context) : LinearLayout(context) {
     var onCandidateSelected: (Int) -> Unit = {}
     var onPageChanged: (PageDirection) -> Unit = {}
-    private val grid = GridLayout(context).apply { columnCount = 3 }
-    private val scroll = ScrollView(context).apply {
-        isFillViewport = true
-        addView(grid)
+    private val layout = GridLayoutManager(context, 3)
+    private val adapter = CandidateAdapter()
+    private val scroll = RecyclerView(context).apply {
+        layoutManager = layout
+        adapter = this@ExpandedCandidatesView.adapter
+        itemAnimator = null
+        setItemViewCacheSize(6)
+        addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+                if (dy > 0 && !view.canScrollVertically(1)) requestPage(PageDirection.NEXT, defer = true)
+                if (dy < 0 && !view.canScrollVertically(-1)) requestPage(PageDirection.PREVIOUS, defer = true)
+            }
+        })
     }
     private val previous = panelIconButton(context, android.R.drawable.ic_media_previous, R.string.previous_candidates) {
-        onPageChanged(PageDirection.PREVIOUS)
+        requestPage(PageDirection.PREVIOUS)
     }
     private val next = panelIconButton(context, android.R.drawable.ic_media_next, R.string.next_candidates) {
-        onPageChanged(PageDirection.NEXT)
+        requestPage(PageDirection.NEXT)
     }
-    private val buttons = mutableListOf<CandidateItemView>()
-    private var lastSnapshot: EngineSnapshot? = null
+    private var lastSnapshot = EngineSnapshot.Empty
+    private var pending = false
+    private var revision = 0L
 
     init {
         orientation = VERTICAL
@@ -39,33 +51,83 @@ internal class ExpandedCandidatesView(context: Context) : LinearLayout(context) 
     }
 
     fun render(snapshot: EngineSnapshot) {
+        pending = false
         if (snapshot == lastSnapshot) return
+        val position = layout.findFirstVisibleItemPosition()
+        val anchor = adapter.items.getOrNull(position)?.id
+        val offset = layout.findViewByPosition(position)?.top ?: 0
+        val sameInput = snapshot.rawInput == lastSnapshot.rawInput && snapshot.composition == lastSnapshot.composition
         lastSnapshot = snapshot
-        while (buttons.size < snapshot.candidates.size) {
-            val index = buttons.size
-            buttons += CandidateItemView(context).also { button ->
-                button.onSelected = { onCandidateSelected(it) }
-                button.setSingleLine(false)
-                button.maxLines = 2
-                button.textSize = 16f
-                grid.addView(button, GridLayout.LayoutParams(
-                    GridLayout.spec(index / 3), GridLayout.spec(index % 3, 1f),
-                ).apply { width = 0; height = dp(48) })
-            }
-        }
-        buttons.forEachIndexed { index, button ->
-            val candidate = snapshot.candidates.getOrNull(index)
-            button.visibility = if (candidate == null) View.GONE else View.VISIBLE
-            if (candidate != null) button.bind(candidate, index, index == snapshot.highlightedIndex) else button.clear()
-        }
+        revision++
+        adapter.replace(snapshot.candidates, snapshot.highlightedIndex)
+        val preserved = if (sameInput) snapshot.candidates.indexOfFirst { it.id == anchor } else -1
+        layout.scrollToPositionWithOffset(preserved.coerceAtLeast(0), if (preserved >= 0) offset else 0)
         previous.isEnabled = snapshot.hasPreviousPage
         previous.alpha = if (previous.isEnabled) 1f else 0.35f
         next.isEnabled = snapshot.hasNextPage
         next.alpha = if (next.isEnabled) 1f else 0.35f
-        scroll.scrollTo(0, 0)
     }
 
-    fun clear() { render(EngineSnapshot.Empty) }
+    private fun requestPage(direction: PageDirection, defer: Boolean = false) {
+        val available = if (direction == PageDirection.NEXT) lastSnapshot.hasNextPage else lastSnapshot.hasPreviousPage
+        if (pending || !available) return
+        pending = true
+        val expected = revision
+        // Paging can render synchronously. Always leave RecyclerView's scroll
+        // callback before notifying the adapter.
+        if (defer || scroll.isComputingLayout) post {
+            if (revision == expected && isShown) onPageChanged(direction)
+            pending = false
+        } else {
+            onPageChanged(direction)
+            pending = false
+        }
+    }
+
+    fun clear() {
+        revision++
+        render(EngineSnapshot.Empty)
+        for (index in 0 until scroll.childCount) (scroll.getChildAt(index) as? CandidateItemView)?.clear()
+    }
+
+    private inner class CandidateAdapter : RecyclerView.Adapter<CandidateHolder>() {
+        var items: List<Candidate> = emptyList()
+            private set
+        private var highlighted = 0
+
+        fun replace(values: List<Candidate>, selected: Int) {
+            val before = items
+            val oldHighlighted = highlighted
+            val changes = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize() = before.size
+                override fun getNewListSize() = values.size
+                override fun areItemsTheSame(old: Int, new: Int) = before[old].id == values[new].id
+                override fun areContentsTheSame(old: Int, new: Int) = before[old] == values[new] &&
+                    (old == oldHighlighted) == (new == selected)
+            }, false)
+            items = values
+            highlighted = selected
+            changes.dispatchUpdatesTo(this)
+        }
+
+        override fun getItemCount(): Int = items.size
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CandidateHolder =
+            CandidateHolder(CandidateItemView(parent.context).apply {
+                setSingleLine(false)
+                maxLines = 2
+                textSize = 16f
+                layoutParams = RecyclerView.LayoutParams(LayoutParams.MATCH_PARENT, dp(48))
+                onSelected = { onCandidateSelected(it) }
+            })
+
+        override fun onBindViewHolder(holder: CandidateHolder, position: Int) {
+            holder.view.bind(items[position], position, position == highlighted)
+        }
+
+        override fun onViewRecycled(holder: CandidateHolder) { holder.view.clear() }
+    }
+
+    private class CandidateHolder(val view: CandidateItemView) : RecyclerView.ViewHolder(view)
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }

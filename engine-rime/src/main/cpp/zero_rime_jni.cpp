@@ -294,12 +294,13 @@ Java_dev_zeroinput_engine_rime_NativeRimeBridge_nativeReadUpdate(
   jclass type = env->FindClass("dev/zeroinput/engine/rime/NativeRimeUpdate");
   if (!type || env->ExceptionCheck()) return nullptr;
   jmethodID constructor = env->GetMethodID(type, "<init>",
-      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IZI)V");
+      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IZII)V");
   if (!constructor) return nullptr;
   jobject result = env->NewObject(type, constructor, raw, composition, committed, candidates,
       candidate_comments, context.acquired ? context.value.menu.page_no : 0,
       static_cast<jboolean>(!context.acquired || context.value.menu.is_last_page),
-      context.acquired ? context.value.menu.highlighted_candidate_index : 0);
+      context.acquired ? context.value.menu.highlighted_candidate_index : 0,
+      api && session_id ? static_cast<jint>(api->get_caret_pos(session_id)) : 0);
   env->DeleteLocalRef(raw);
   env->DeleteLocalRef(composition);
   env->DeleteLocalRef(committed);
@@ -317,6 +318,45 @@ Java_dev_zeroinput_engine_rime_NativeRimeBridge_nativeSelectCandidate(
                                    static_cast<RimeSessionId>(session_id), index)
              ? JNI_TRUE
              : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_dev_zeroinput_engine_rime_NativeRimeBridge_nativeCandidatePage(
+    JNIEnv* env, jobject, jlong session_id, jint page, jint size) {
+  std::lock_guard<std::mutex> lock(engine_mutex);
+  std::vector<std::string> texts;
+  std::vector<std::string> comments;
+  bool has_next = false;
+  if (api && session_id && page >= 0 && page <= 1000000 && size >= 1 && size <= 10) {
+    RimeCandidateListIterator iterator{};
+    if (api->candidate_list_from_index(session_id, &iterator, page * size)) {
+      while (api->candidate_list_next(&iterator)) {
+        if (texts.size() == static_cast<size_t>(size)) { has_next = true; break; }
+        texts.emplace_back(iterator.candidate.text ? iterator.candidate.text : "");
+        comments.emplace_back(iterator.candidate.comment ? iterator.candidate.comment : "");
+      }
+      api->candidate_list_end(&iterator);
+    }
+  }
+  jclass type = env->FindClass("dev/zeroinput/engine/rime/NativeCandidatePage");
+  if (!type || env->ExceptionCheck()) return nullptr;
+  jmethodID constructor = env->GetMethodID(type, "<init>", "([Ljava/lang/String;[Ljava/lang/String;Z)V");
+  if (!constructor) return nullptr;
+  jobjectArray values = ToStringArray(env, texts);
+  jobjectArray hints = ToStringArray(env, comments);
+  jobject result = env->NewObject(type, constructor, values, hints, static_cast<jboolean>(has_next));
+  env->DeleteLocalRef(values);
+  env->DeleteLocalRef(hints);
+  env->DeleteLocalRef(type);
+  return result;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_zeroinput_engine_rime_NativeRimeBridge_nativeSelectAbsoluteCandidate(
+    JNIEnv*, jobject, jlong session_id, jint index) {
+  std::lock_guard<std::mutex> lock(engine_mutex);
+  return api && session_id && index >= 0 && api->select_candidate(
+      static_cast<RimeSessionId>(session_id), static_cast<size_t>(index)) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -351,4 +391,15 @@ Java_dev_zeroinput_engine_rime_NativeRimeBridge_nativeSetInput(
       })) return JNI_FALSE;
   std::lock_guard<std::mutex> lock(engine_mutex);
   return api && session_id && api->set_input(session_id, value.c_str()) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_zeroinput_engine_rime_NativeRimeBridge_nativeSetCaret(
+    JNIEnv*, jobject, jlong session_id, jint position) {
+  std::lock_guard<std::mutex> lock(engine_mutex);
+  if (!api || !session_id || position < 0 || position > 128) return JNI_FALSE;
+  const char* input = api->get_input(session_id);
+  if (!input || static_cast<size_t>(position) > std::char_traits<char>::length(input)) return JNI_FALSE;
+  api->set_caret_pos(session_id, static_cast<size_t>(position));
+  return JNI_TRUE;
 }

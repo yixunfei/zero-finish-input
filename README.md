@@ -6,34 +6,34 @@
 
 **离线中文与英文输入法，面向 Android 8.0 及以上设备。**
 
-[下载 v0.1.0 测试版](https://github.com/yixunfei/zero-finish-input/releases/tag/v0.1.0) ·
+[下载 v0.2.0 测试版](https://github.com/yixunfei/zero-finish-input/releases/tag/v0.2.0) ·
 [提交问题](https://github.com/yixunfei/zero-finish-input/issues) ·
 [贡献指南](CONTRIBUTING.md) · [安全政策](SECURITY.md) · [Apache-2.0](LICENSE)
 
-zero finish input（原工程名 ZeroInput）以隐私、安全、离线和可扩展性为核心。当前首发为
-`v0.1.0` **预发布测试版**，中文提供全拼、简拼及可配置模糊拼音，同时提供离线英文候选、emoji 分类/搜索/最近使用、加密用户词组
+zero finish input（原工程名 ZeroInput）以隐私、安全、离线和可扩展性为核心。当前版本为
+`v0.2.0` **预发布测试版**，中文提供全拼、简拼及可配置模糊拼音，同时提供离线英文候选、emoji 分类/搜索/最近使用、加密用户词组
 以及需要系统身份认证的安全剪贴板。
 
 An offline Android keyboard for Chinese Pinyin and English, with encrypted local
 personalization and a private, authenticated snippet vault. Android 8.0+;
-Apache-2.0 project code. The first release is a debug-signed testing prerelease.
+Apache-2.0 project code. Version 0.2.0 is a debug-signed testing prerelease.
 
 项目展示及应用显示名称使用 `zero finish input`。Logo 保留所提供原图，图中文字为
 `ZERO FISH INPUT`；Android 启动图标使用该图的主体裁切。内部包名和数据标识保留 `zeroinput`。
 
 ## 安装与启用
 
-1. 从 [Release 页面](https://github.com/yixunfei/zero-finish-input/releases/tag/v0.1.0)
-   下载 `zero-finish-input-0.1.0-debug-universal.apk`。它包含 `arm64-v8a`、`armeabi-v7a` 和
+1. 从 [Release 页面](https://github.com/yixunfei/zero-finish-input/releases/tag/v0.2.0)
+   下载 `zero-finish-input-0.2.0-debug-universal.apk`。它包含 `arm64-v8a`、`armeabi-v7a` 和
    `x86_64` 三种架构，要求 Android 8.0（API 26）或更新版本。
 2. 对照同页 `SHA256SUMS.txt` 校验下载；Windows 可运行
-   `Get-FileHash .\zero-finish-input-0.1.0-debug-universal.apk -Algorithm SHA256`。
+   `Get-FileHash .\zero-finish-input-0.2.0-debug-universal.apk -Algorithm SHA256`。
 3. 安装后打开 **zero finish input**，在系统输入法设置中启用，然后选择为当前键盘。
    Android 会显示针对所有第三方输入法的系统提醒；项目的隐私边界见下文。
 4. 在普通输入框中输入 `nihao` 并选取“你好”，通过语言切换键切换英文。
    首次启动会在设备上准备 Rime 数据，无需联网。
 
-本次 APK 使用 **Debug 签名**，包名为 `dev.zeroinput.ime.debug`，版本为 `0.1.0-debug`，
+本次 APK 使用 **Debug 签名**，包名为 `dev.zeroinput.ime.debug`，版本为 `0.2.0-debug`，
 可调试，仅用于体验和反馈。尚未配置维护者正式发布签名，不建议用此测试包保存真实秘密。
 Release 源码构建生成的包名为 `dev.zeroinput.ime`，两个包的本地数据彼此独立。
 不同开发环境的 Debug 签名可能不同；遇到签名冲突不要直接卸载，以免丢失本地数据。
@@ -42,6 +42,29 @@ Release 源码构建生成的包名为 `dev.zeroinput.ime`，两个包的本地�
 只有用户词组支持主动导出，导出文件为明文；安全片段没有导出或恢复入口。
 
 ## 当前能力与边界
+
+v0.2.0 新增连续候选浏览、逐段选字/撤销选段和上屏后重选上一词。展开候选后滚动或翻页
+继续查看；全键盘在原拼音结果结束后给出标有“相近”的有效分组和相近读音。相关来源均已
+检索完会停止，不会用无关内容重复填满列表。
+
+词库没有完整短语时，可点“逐字选字”，依次选字完成；“撤销上一段选字”用于修改已选片段。
+完整新词在允许学习的输入框中保存至加密用户词库。上屏后工具栏短暂显示“重新选词”，
+要求光标仍在该词后且没有继续编辑；不支持组合区间的应用会拒绝重选，原文字保留。
+
+设置中的“防误触纠错（实验）”默认关闭，只作用于 Rime 全键盘。它提供临近键、错序、
+漏字母和重复字母的拼音候选，可能增加 CPU 开销和干扰候选，需要手动开启。横屏短窗口使用
+紧凑布局，并把表情搜索与键盘并排放置，为编辑内容保留空间。
+
+“短词智能排序（实验）”默认关闭，使用约 15 MB 的 RoBERTa-Mini INT8，根据本次成功上屏的
+最多 16 个中文字符调整两字词候选顺序，全程离线。密码、隐身及禁用学习等输入不使用模型上下文。
+模型可能误改首选词；用户已确认按实验功能接入，原定误改率门槛未通过。模型体积不包括推理运行库。
+使用、构建与限制见[模型接入](docs/model-integration.md)及[模型评估](docs/small-model-evaluation.md)。更多策略与验收记录见
+[输入策略对比](docs/input-strategy-comparison.md)及[验证报告](docs/input-improvement-validation.md)。
+
+本版还修复 Android 16 设备回归中输入法未绑定导致的剪贴板确认超时，以及状态栏遮挡
+测试文字导致的原生选字菜单不稳定；补充取消确认、关闭监听和服务未绑定的负向测试。
+详细结果见[模型与剪贴板验证](docs/model-integration-validation.md)和
+[v0.2.0 发布验证](docs/releases/v0.2.0-validation.md)。
 
 | 能力 | 当前实现 |
 | --- | --- |
@@ -214,6 +237,17 @@ cd zero-finish-input
 ./tools/bootstrap-rime.ps1
 ```
 
+v0.2.0 同时需要预先生成并校验随包的 Mini INT8 模型与词表，即使运行时排序开关关闭也需要这些
+构建资产。请先按[模型构建说明](docs/model-integration.md#reproduce-assets-and-build)准备固定版本的
+Python 依赖，再从仓库根目录执行：
+
+```powershell
+python -B tools/evaluate-small-model.py --model mini --download
+python -B tools/export-model-benchmark.py --model mini --int8
+```
+
+模型和词表不存入 Git；缺失或哈希不符会使构建失败。以上下载仅发生在开发机，应用不会运行时下载。
+
 开发验证可以只编译当前模拟器 ABI，避免重复构建 native 依赖：
 
 ```powershell
@@ -258,6 +292,7 @@ APK、第三方许可证压缩包及 SHA-256 清单位于 `app/build/outputs/tes
 - `engine-english`：离线英文候选引擎。
 - `engine-dictionary`：独立的离线有限词典中文测试引擎，默认不启用。
 - `ime-core`：输入会话、编辑器交互和隐私策略。
+- `model-scoring`：可选的离线 Mini INT8 候选评分、模型校验和推理资源管理。
 - `ime-ui`：键盘、候选栏、安全剪贴板入口和 emoji 面板。
 - `security`：Android Keystore、AES-GCM 与认证授权。
 - `user-data`：用户词组、词频、emoji 历史和安全剪贴板。
@@ -318,7 +353,7 @@ APK、第三方许可证压缩包及 SHA-256 清单位于 `app/build/outputs/tes
 9. 使用 `aapt2 dump permissions` 核对最终 APK 不含 `INTERNET`，并检查每个包只含对应 ABI。
 
 已在 Android Studio 的 x86_64 模拟器上执行 Rime 和输入面板回归，并进行实际 IME 操作检查。
-真机的系统身份认证、厂商输入框行为及 ARM 设备运行仍需按上述清单在发布前验收。
+真机的系统身份认证、厂商输入框行为及 ARM 设备运行仍需按上述清单在正式发布前验收。
 
 ## 参与与许可
 
@@ -331,5 +366,5 @@ APK、第三方许可证压缩包及 SHA-256 清单位于 `app/build/outputs/tes
 [源码获取说明](SOURCES.md)。分发 APK 时请同时保留上述许可与来源说明。
 
 下一阶段优先扩大 ARM 真机和系统认证验收、测量实际输入延迟，并持续改进输入正确性。
-当前进展见 [项目推进记录](docs/project-progress.md)，首发说明见
-[v0.1.0](docs/releases/v0.1.0.md)。
+当前进展见 [项目推进记录](docs/project-progress.md)，本版说明见
+[v0.2.0](docs/releases/v0.2.0.md)，首发记录见 [v0.1.0](docs/releases/v0.1.0.md)。

@@ -16,6 +16,7 @@ data class ChineseInputOptions(
     val chinesePunctuation: Boolean = true,
     val candidatePageSize: Int = 8,
     val keyboardLayout: ChineseKeyboardLayout = ChineseKeyboardLayout.FULL,
+    val experimentalTypoCorrection: Boolean = false,
 ) {
     init {
         require(fuzzyPinyinMask in 0..255)
@@ -36,4 +37,5 @@ data class ChineseInputOptions(
 
 enum class EngineCapability {
     CHINESE_SCRIPT, ABBREVIATED_PINYIN, FUZZY_PINYIN, PUNCTUATION_MODE, CANDIDATE_PAGE_SIZE, NINE_KEY_PINYIN,
+    TYPO_CORRECTION, SEGMENT_SELECTION,
 }

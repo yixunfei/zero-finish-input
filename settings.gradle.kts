@@ -23,6 +23,7 @@ include(
     ":engine-rime",
     ":engine-dictionary",
     ":ime-core",
+    ":model-scoring",
     ":ime-ui",
     ":language-pack",
     ":security",

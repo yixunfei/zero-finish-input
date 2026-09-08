@@ -30,6 +30,9 @@ internal class ChineseSettingsView(context: Context) : LinearLayout(context) {
     }
     private val abbreviated = optionSwitch(R.string.abbreviated_pinyin) { update(options.copy(abbreviatedPinyin = it)) }
     private val punctuation = optionSwitch(R.string.chinese_punctuation) { update(options.copy(chinesePunctuation = it)) }
+    private val typoCorrection = optionSwitch(R.string.experimental_typo_correction) {
+        update(options.copy(experimentalTypoCorrection = it))
+    }
     private val layoutButtons = mapOf(
         ChineseKeyboardLayout.FULL to modeButton(context.getString(R.string.keyboard_full)),
         ChineseKeyboardLayout.NINE_KEY to modeButton(context.getString(R.string.keyboard_nine)),
@@ -53,6 +56,8 @@ internal class ChineseSettingsView(context: Context) : LinearLayout(context) {
         addView(scripts)
         addView(abbreviated)
         addView(punctuation)
+        addView(typoCorrection)
+        label(R.string.experimental_typo_help)
         label(R.string.candidate_page_size)
         addView(pages)
         label(R.string.fuzzy_pinyin)
@@ -67,6 +72,8 @@ internal class ChineseSettingsView(context: Context) : LinearLayout(context) {
             layouts.check(layoutButtons.getValue(value.keyboardLayout).id)
             abbreviated.isChecked = value.abbreviatedPinyin
             punctuation.isChecked = value.chinesePunctuation
+            typoCorrection.isChecked = value.experimentalTypoCorrection
+            typoCorrection.isEnabled = EngineCapability.TYPO_CORRECTION in capabilities && value.keyboardLayout == ChineseKeyboardLayout.FULL
             pages.check(pageButtons.getValue(value.candidatePageSize).id)
             fuzzySwitches.forEach { (pair, view) -> view.isChecked = value.isFuzzyEnabled(pair) }
             scriptButtons.values.forEach { it.isEnabled = EngineCapability.CHINESE_SCRIPT in capabilities }

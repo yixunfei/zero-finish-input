@@ -28,6 +28,7 @@ data class SettingsScreenState(
     val hapticsEnabled: Boolean,
     val engineStatus: String,
     val chineseOptions: ChineseInputOptions = ChineseInputOptions(),
+    val experimentalModelRanking: Boolean = false,
     val languagePacks: List<LanguagePackScreenState> = emptyList(),
     val chineseEngine: ChineseEngineChoice = ChineseEngineChoice.RIME,
     val engineCapabilities: Set<EngineCapability> = EngineCapability.entries.toSet(),
@@ -61,6 +62,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
     var onLanguagePackSelected: (String) -> Unit = {}
     var onLanguagePackDeleteRequested: (String) -> Unit = {}
     var onChineseOptionsChanged: (ChineseInputOptions) -> Unit = {}
+    var onModelRankingChanged: (Boolean) -> Unit = {}
     var onBuiltInEngineSelected: () -> Unit = {}
     var onChineseEngineChanged: (ChineseEngineChoice) -> Unit = {}
 
@@ -79,6 +81,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
         orientation = LinearLayout.VERTICAL
     }
     private val learningSwitch = settingSwitch(context.getString(R.string.setting_learning)) { onLearningChanged(it) }
+    private val modelSwitch = settingSwitch(context.getString(R.string.experimental_model_ranking)) { onModelRankingChanged(it) }
     private val incognitoSwitch = settingSwitch(context.getString(R.string.setting_incognito)) { onIncognitoChanged(it) }
     private val secureClipboardSwitch = settingSwitch(context.getString(R.string.secure_clipboard)) { onSecureClipboardChanged(it) }
     private val hapticsSwitch = settingSwitch(context.getString(R.string.setting_haptics)) { onHapticsChanged(it) }
@@ -125,6 +128,7 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
         try {
             engineChoices.check(engineButtons.getValue(state.chineseEngine).id)
             updateSwitch(learningSwitch, state.learningEnabled)
+            updateSwitch(modelSwitch, state.experimentalModelRanking)
             updateSwitch(incognitoSwitch, state.incognitoMode)
             updateSwitch(secureClipboardSwitch, state.secureClipboardEnabled)
             updateSwitch(hapticsSwitch, state.hapticsEnabled)
@@ -181,6 +185,8 @@ class SettingsScreenView(context: Context) : ScrollView(context) {
         content.addView(dictionaryNotice)
         command(context.getString(R.string.select_builtin_chinese)) { onBuiltInEngineSelected() }
         content.addView(chineseSettings)
+        content.addView(modelSwitch)
+        content.addView(TextView(context).apply { setText(R.string.experimental_model_help); textSize = 14f })
 
         section(context.getString(R.string.section_engine))
         statusRow(context.getString(R.string.language_chinese), engineStatus)

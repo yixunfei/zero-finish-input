@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="related_candidate">%1$s · 相近</string>
+    <string name="reconvert_last_word">重新选词</string>
+    <string name="undo_segment">撤销上一段选字</string>
+    <string name="select_single_syllable">逐字选字</string>
     <string name="clipboard_guard_open">系统剪贴板防护</string>
     <string name="clipboard_guard_changed">系统剪贴板已变化</string>
     <string name="keyboard_settings">zero finish input 设置</string>

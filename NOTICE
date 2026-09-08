@@ -24,3 +24,16 @@ The adaptation preserves expression spacing, adjusts categories and adds greetin
 and sleep entries. Both original data and the adapted KaomojiCatalog.kt source
 are distributed under assets/expressions/ in the APK. Its license texts are in
 LICENSES/rime-kaomoji-LGPL-3.0.txt and LICENSES/GPL-3.0.txt.
+
+The experimental short-word scorer and separate developer benchmark use ONNX
+Runtime 1.26.0 from Microsoft Corporation under MIT; see
+LICENSES/onnxruntime-MIT.txt and LICENSES/onnxruntime-ThirdPartyNotices.txt.
+The bundled Mini INT8 graph is adapted from UER's
+roberta-mini-wwm-chinese-cluecorpussmall, revision
+5e567169018f5cf84cf1d85a2b391c8d51211eda. Conversion exports masked-position
+log-probabilities and dynamically quantizes MatMul/Gather weights.
+The project uses the UER Apache-2.0 licensing basis explicitly confirmed by the
+maintainer; see https://github.com/dbiir/UER-py and LICENSES/Apache-2.0.txt.
+The independent model card has no weight-license metadata. This notice records
+the project decision, not an additional upstream statement. Tiny/FP16 research
+graphs and host tools (including ONNX under Apache-2.0) are not bundled.

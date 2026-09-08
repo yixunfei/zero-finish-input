@@ -20,6 +20,53 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class UserLexiconBoundaryTest {
+    @Test fun completedUnknownPhraseIsLearnedWithItsWholeReadingAndAvailableAfterReload() {
+        val store = MemoryStore()
+        val repository = UserLexiconRepository(store)
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val factory = dev.zeroinput.engine.rime.RimeEngineFactory(context)
+        val engine = factory.createFallback()
+        val connection = object : dev.zeroinput.ime.core.EditorConnection {
+            override fun setComposingText(text: String) = Unit
+            override fun finishComposingText() = Unit
+            override fun commitText(text: String) = Unit
+            override fun deleteBeforeCursor() = Unit
+            override fun performEditorAction(actionId: Int) = false
+            override fun sendEnterKey() = Unit
+        }
+        val controller = dev.zeroinput.ime.core.InputSessionController(connection, { engine }, repository)
+        val info = android.view.inputmethod.EditorInfo().apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }
+        controller.start(info, InputLanguage.CHINESE, dev.zeroinput.ime.core.privacy.PrivacyConfiguration())
+        try {
+            "niaihao".forEach { controller.handle(dev.zeroinput.ime.core.InputCommand.Text(it.toString())) }
+            for (word in listOf("你", "爱", "浩")) {
+                val index = controller.state.snapshot.candidates.indexOfFirst { it.text == word }
+                assertTrue(index >= 0)
+                controller.handle(dev.zeroinput.ime.core.InputCommand.SelectCandidate(index))
+                if (word != "浩") assertEquals(0, store.writes)
+            }
+            val reloaded = UserLexiconRepository(store)
+            assertEquals("你爱浩", reloaded.suggestionsFor("niaihao", InputLanguage.CHINESE, 8).single().text)
+            assertTrue(reloaded.suggestionsFor("hao", InputLanguage.CHINESE, 8).isEmpty())
+            controller.start(info, InputLanguage.CHINESE, dev.zeroinput.ime.core.privacy.PrivacyConfiguration())
+            "niaihao".forEach { controller.handle(dev.zeroinput.ime.core.InputCommand.Text(it.toString())) }
+            assertTrue(controller.state.snapshot.candidates.any { it.text == "你爱浩" && it.id.startsWith("personal:") })
+        } finally { controller.close() }
+    }
+
+    @Test fun pagingReachesMoreThanFiftyLearnedWordsWithoutDuplicateOrMissingIdentities() {
+        val store = MemoryStore(document(117).toByteArray())
+        val repository = UserLexiconRepository(store)
+        val seen = mutableSetOf<String>()
+        var offset = 0
+        do {
+            val page = repository.suggestionPage("word", InputLanguage.ENGLISH, offset, 8)
+            page.items.forEach { assertTrue(seen.add(it.id)) }
+            offset += page.items.size
+        } while (page.hasMore)
+        assertEquals(117, seen.size)
+    }
+
     @Test
     fun addingBeyondCapacityFailsWithoutMakingThePersistedDictionaryUnreadable() {
         val store = MemoryStore(document(20_000).toByteArray())

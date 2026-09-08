@@ -1,125 +1,161 @@
 package dev.zeroinput.engine.rime
 
-import dev.zeroinput.engine.api.Candidate
-import dev.zeroinput.engine.api.EditorContext
-import dev.zeroinput.engine.api.EngineDescriptor
-import dev.zeroinput.engine.api.EngineKey
-import dev.zeroinput.engine.api.EngineSnapshot
-import dev.zeroinput.engine.api.EngineUpdate
-import dev.zeroinput.engine.api.InputEngine
-import dev.zeroinput.engine.api.InputLanguage
-import dev.zeroinput.engine.api.PageDirection
+import dev.zeroinput.engine.api.*
 
-internal class FallbackPinyinEngine : InputEngine {
+/** Small, immediately available engine used while the public native dictionary warms up. */
+internal class FallbackPinyinEngine : InputEngine, CompositionEditingEngine {
     private val input = StringBuilder()
-    private var currentSnapshot = EngineSnapshot.Empty
-    private var language = InputLanguage.CHINESE
+    private val segments = ArrayDeque<Segment>()
+    private var page = 0
+    private var syllableOnly = false
+    private var choices = emptyList<Choice>()
+    override var snapshot = EngineSnapshot.Empty
+        private set
 
     override val descriptor = EngineDescriptor(
         id = "zeroinput.pinyin-fallback",
         displayName = "内置全拼（降级）",
-        version = "1",
+        version = "2",
         languages = setOf(InputLanguage.CHINESE),
         isFallback = true,
+        capabilities = setOf(EngineCapability.SEGMENT_SELECTION, EngineCapability.CANDIDATE_PAGE_SIZE),
     )
 
-    override val snapshot: EngineSnapshot
-        get() = currentSnapshot
-
-    override fun start(context: EditorContext): EngineSnapshot {
-        language = context.language
-        return reset()
-    }
+    override fun start(context: EditorContext): EngineSnapshot = reset()
 
     override fun handle(key: EngineKey): EngineUpdate = when (key) {
-        is EngineKey.Character -> handleCharacter(key.text)
-        EngineKey.Backspace -> handleBackspace()
-        EngineKey.Space -> commitBest(if (input.isEmpty()) " " else "")
-        EngineKey.Enter -> handleEnter()
+        is EngineKey.Character -> character(key.text)
+        EngineKey.Backspace -> backspace()
+        EngineKey.Space -> if (snapshot.candidates.isNotEmpty()) selectCandidate(0) else commitLiteral(" ")
+        EngineKey.Enter -> if (snapshot.candidates.isNotEmpty()) selectCandidate(0)
+            else EngineUpdate(snapshot, consumed = false)
     }
 
     override fun selectCandidate(index: Int): EngineUpdate {
-        val candidate = currentSnapshot.candidates.getOrNull(index)
-            ?: return EngineUpdate(currentSnapshot, consumed = false)
-        input.clear()
-        currentSnapshot = EngineSnapshot.Empty
-        return EngineUpdate(currentSnapshot, candidate.text)
+        if (index !in snapshot.candidates.indices) return EngineUpdate(snapshot, consumed = false)
+        val choice = choices.getOrNull(page * PAGE_SIZE + index) ?: return EngineUpdate(snapshot, consumed = false)
+        segments.addLast(Segment(choice.text, choice.reading, choice.consumed))
+        if (consumedLength() >= input.length) {
+            val text = segments.joinToString("") { it.text }
+            val reading = segments.joinToString("") { it.reading }
+            return EngineUpdate(reset(), text, committedInput = reading)
+        }
+        syllableOnly = false
+        return refresh()
     }
 
-    override fun changePage(direction: PageDirection) = EngineUpdate(currentSnapshot, consumed = false)
+    override fun changePage(direction: PageDirection): EngineUpdate {
+        val target = page + if (direction == PageDirection.NEXT) 1 else -1
+        if (target < 0 || target * PAGE_SIZE >= choices.size) return EngineUpdate(snapshot, consumed = false)
+        page = target
+        return render()
+    }
+
+    override fun restoreComposition(input: String): EngineUpdate {
+        if (input.length !in 1..MAX_INPUT || input.any { it !in 'a'..'z' && it != '\'' }) {
+            return EngineUpdate(snapshot, consumed = false)
+        }
+        reset()
+        this.input.append(input)
+        return refresh()
+    }
+
+    override fun undoSelection(): EngineUpdate {
+        if (segments.isEmpty()) return EngineUpdate(snapshot, consumed = false)
+        segments.removeLast()
+        syllableOnly = false
+        return refresh()
+    }
+
+    override fun selectSyllable(): EngineUpdate {
+        if (input.isEmpty()) return EngineUpdate(snapshot, consumed = false)
+        syllableOnly = true
+        return refresh()
+    }
 
     override fun reset(): EngineSnapshot {
         input.clear()
-        currentSnapshot = EngineSnapshot.Empty
-        return currentSnapshot
+        segments.clear()
+        choices = emptyList()
+        page = 0
+        syllableOnly = false
+        snapshot = EngineSnapshot.Empty
+        return snapshot
     }
 
-    override fun close() {
-        reset()
-    }
+    override fun close() { reset() }
 
-    private fun handleCharacter(text: String): EngineUpdate {
-        val normalized = normalizeCharacter(text)
-        if (normalized != null) {
-            input.append(normalized)
-            currentSnapshot = createSnapshot()
-            return EngineUpdate(currentSnapshot)
+    private fun character(text: String): EngineUpdate {
+        val letter = text.singleOrNull()?.lowercaseChar()
+        if (letter != null && (letter in 'a'..'z' || letter == '\'')) {
+            if (input.length == MAX_INPUT) return EngineUpdate(snapshot, consumed = false)
+            input.append(letter)
+            syllableOnly = false
+            return refresh()
         }
-        return commitBest(text)
+        return commitLiteral(text)
     }
 
-    /** Chinese pinyin is case-insensitive, including after an accidental Shift. */
-    private fun normalizeCharacter(text: String): String? {
-        if (text == "'") return text
-        if (text.length != 1 || !text[0].isLetter()) return null
-        val character = text[0]
-        return when {
-            character in 'a'..'z' -> character.toString()
-            language == InputLanguage.CHINESE && character in 'A'..'Z' ->
-                character.lowercaseChar().toString()
-            else -> null
-        }
-    }
-
-    private fun handleBackspace(): EngineUpdate {
-        if (input.isEmpty()) return EngineUpdate(currentSnapshot, consumed = false)
+    private fun backspace(): EngineUpdate {
+        if (input.isEmpty()) return EngineUpdate(snapshot, consumed = false)
+        if (segments.isNotEmpty()) return undoSelection()
         input.deleteCharAt(input.lastIndex)
-        currentSnapshot = createSnapshot()
-        return EngineUpdate(currentSnapshot)
+        syllableOnly = false
+        return refresh()
     }
 
-    private fun handleEnter(): EngineUpdate {
-        val candidate = currentSnapshot.candidates.firstOrNull()
-            ?: return EngineUpdate(currentSnapshot, consumed = false)
-        input.clear()
-        currentSnapshot = EngineSnapshot.Empty
-        return EngineUpdate(currentSnapshot, committedText = candidate.text)
+    private fun commitLiteral(suffix: String): EngineUpdate {
+        val value = segments.joinToString("") { it.text } + input.substring(consumedLength()) + suffix
+        return EngineUpdate(reset(), value, learnable = false)
     }
 
-    private fun commitBest(suffix: String): EngineUpdate {
-        val value = currentSnapshot.candidates.firstOrNull()?.text ?: input.toString()
-        input.clear()
-        currentSnapshot = EngineSnapshot.Empty
-        return EngineUpdate(currentSnapshot, value + suffix)
+    private fun consumedLength(): Int = segments.sumOf { it.consumed }
+
+    private fun refresh(): EngineUpdate {
+        page = 0
+        val remaining = input.substring(consumedLength())
+        val leading = remaining.takeWhile { it == '\'' }.length
+        val raw = remaining.drop(leading)
+        val found = ArrayList<Choice>()
+        if (!syllableOnly) {
+            val compact = raw.replace("'", "")
+            for ((reading, words) in completions[compact].orEmpty()) {
+                words.forEach { found += Choice(it, reading, remaining.length) }
+            }
+        }
+        val prefixes = (1..raw.length).filter { raw.substring(0, it) in phrases }
+        val lengths = if (syllableOnly) prefixes.take(1) else prefixes.reversed()
+        for (length in lengths) {
+            val reading = raw.substring(0, length)
+            val trailing = raw.drop(length).takeWhile { it == '\'' }.length
+            phrases.getValue(reading).forEach { found += Choice(it, reading, leading + length + trailing) }
+        }
+        choices = found.distinctBy { it.text to it.consumed }
+        return render()
     }
 
-    private fun createSnapshot(): EngineSnapshot {
+    private fun render(): EngineUpdate {
         val raw = input.toString()
-        if (raw.isEmpty()) return EngineSnapshot.Empty
-        val exact = phrases[raw].orEmpty()
-        val completions = phrases.asSequence()
-            .filter { (key, _) -> key.startsWith(raw) }
-            .flatMap { it.value.asSequence() }
-        val candidates = exact.asSequence()
-            .plus(completions)
-            .distinct()
-            .take(8)
-            .mapIndexed { index, value -> Candidate("fallback:$index:$value", value, "内置") }
-            .toList()
-        return EngineSnapshot(raw, raw, candidates)
+        snapshot = EngineSnapshot(
+            rawInput = raw,
+            composition = segments.joinToString("") { it.text } + raw.drop(consumedLength()),
+            candidates = choices.drop(page * PAGE_SIZE).take(PAGE_SIZE).mapIndexed { index, choice ->
+                Candidate("fallback:${page * PAGE_SIZE + index}", choice.text, choice.reading, input = choice.reading)
+            },
+            hasPreviousPage = page > 0,
+            hasNextPage = (page + 1) * PAGE_SIZE < choices.size,
+            canUndoSelection = segments.isNotEmpty(),
+            canSelectSyllable = raw.isNotEmpty(),
+        )
+        return EngineUpdate(snapshot)
     }
+
+    private data class Segment(val text: String, val reading: String, val consumed: Int)
+    private data class Choice(val text: String, val reading: String, val consumed: Int)
 
     private companion object {
+        const val PAGE_SIZE = 8
+        const val MAX_INPUT = 128
         val phrases = mapOf(
             "a" to listOf("啊", "阿"), "ai" to listOf("爱", "哎", "唉"),
             "an" to listOf("安", "按", "案"), "ba" to listOf("吧", "八", "把"),
@@ -146,5 +182,11 @@ internal class FallbackPinyinEngine : InputEngine {
             "keyi" to listOf("可以"), "meiyou" to listOf("没有"),
             "zaijian" to listOf("再见"), "shijie" to listOf("世界"),
         )
+        val completions: Map<String, List<Pair<String, List<String>>>> = buildMap {
+            for ((reading, values) in phrases) for (length in 1..reading.length) {
+                val prefix = reading.take(length)
+                put(prefix, get(prefix).orEmpty() + (reading to values))
+            }
+        }
     }
 }

@@ -34,6 +34,10 @@ class SettingsRepository(context: Context) {
         get() = preferences.getBoolean(KEY_LEARNING, true)
         set(value) = edit(KEY_LEARNING, value)
 
+    var experimentalModelRanking: Boolean
+        get() = preferences.getBoolean(KEY_MODEL_RANKING, false)
+        set(value) = edit(KEY_MODEL_RANKING, value)
+
     var incognitoMode: Boolean
         get() = preferences.getBoolean(KEY_INCOGNITO, false)
         set(value) = edit(KEY_INCOGNITO, value)
@@ -75,6 +79,7 @@ class SettingsRepository(context: Context) {
             chinesePunctuation = preferences.getBoolean(KEY_CHINESE_PUNCTUATION, true),
             candidatePageSize = preferences.getInt(KEY_PAGE_SIZE, 8).takeIf { it in ChineseInputOptions.PAGE_SIZES } ?: 8,
             keyboardLayout = if (preferences.getBoolean(KEY_NINE_KEY, false)) ChineseKeyboardLayout.NINE_KEY else ChineseKeyboardLayout.FULL,
+            experimentalTypoCorrection = preferences.getBoolean(KEY_TYPO_CORRECTION, false),
         )
         set(value) {
             preferences.edit()
@@ -84,6 +89,7 @@ class SettingsRepository(context: Context) {
                 .putBoolean(KEY_CHINESE_PUNCTUATION, value.chinesePunctuation)
                 .putInt(KEY_PAGE_SIZE, value.candidatePageSize)
                 .putBoolean(KEY_NINE_KEY, value.keyboardLayout == ChineseKeyboardLayout.NINE_KEY)
+                .putBoolean(KEY_TYPO_CORRECTION, value.experimentalTypoCorrection)
                 .apply()
         }
 
@@ -118,5 +124,7 @@ class SettingsRepository(context: Context) {
         const val KEY_PAGE_SIZE = "chinese.page-size"
         const val KEY_NINE_KEY = "chinese.nine-key"
         const val KEY_CHINESE_ENGINE = "chinese.engine"
+        const val KEY_TYPO_CORRECTION = "chinese.experimental-typo-correction"
+        const val KEY_MODEL_RANKING = "chinese.experimental-model-ranking"
     }
 }

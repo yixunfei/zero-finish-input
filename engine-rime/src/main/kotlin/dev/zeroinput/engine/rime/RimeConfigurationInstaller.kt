@@ -11,10 +11,13 @@ internal class RimeConfigurationInstaller(private val directories: RimeAssetInst
     fun prepare(options: ChineseInputOptions): Pair<String, File> {
         val id = PinyinAlgebra.schemaId(options)
         val file = File(directories.user, "$id.schema.yaml")
-        if (!file.isFile) {
+        val expectedVersion = "3.0"
+        val current = if (file.isFile) runCatching { JSONObject(file.readText()).getJSONObject("schema").getString("version") }.getOrNull() else null
+        if (current != expectedVersion) {
             // JSON is a YAML subset accepted by librime; use a structured parser for edits.
             val schema = JSONObject(File(directories.shared, "zeroinput_pinyin.schema.yaml").readText())
             schema.getJSONObject("schema").put("schema_id", id)
+            schema.getJSONObject("schema").put("version", expectedVersion)
             schema.getJSONObject("translator").put("prism", id)
             schema.getJSONObject("speller").put("algebra", JSONArray(PinyinAlgebra.rules(options)))
             schema.getJSONObject("menu").put("page_size", options.candidatePageSize)

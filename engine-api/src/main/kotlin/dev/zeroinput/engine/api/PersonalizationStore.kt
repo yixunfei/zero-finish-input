@@ -4,6 +4,7 @@ data class PersonalSuggestion(
     val id: String,
     val text: String,
     val frequency: Int,
+    val input: String = "",
 )
 
 interface PersonalizationStore {

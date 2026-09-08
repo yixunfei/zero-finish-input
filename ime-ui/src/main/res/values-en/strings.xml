@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="related_candidate">%1$s · Similar</string>
+    <string name="reconvert_last_word">Reselect last word</string>
+    <string name="undo_segment">Undo segment selection</string>
+    <string name="select_single_syllable">Choose one syllable</string>
     <string name="clipboard_guard_open">System clipboard guard</string>
     <string name="clipboard_guard_changed">System clipboard changed</string>
     <string name="keyboard_settings">zero finish input settings</string>

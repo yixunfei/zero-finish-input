@@ -3,23 +3,64 @@ package dev.zeroinput.ime.input
 import android.view.KeyEvent
 import android.view.inputmethod.InputConnection
 import dev.zeroinput.ime.core.EditorConnection
+import dev.zeroinput.ime.core.ReconversionEditorConnection
 
 class AndroidEditorConnection(
+    initialSelectionStart: Int = -1,
+    initialSelectionEnd: Int = -1,
+    private val onCommitted: (String?) -> Unit = {},
+    private val onContextInvalidated: () -> Unit = {},
     private val current: () -> InputConnection?,
-) : EditorConnection {
+) : EditorConnection, ReconversionEditorConnection {
+    private val selection = EditorSelectionState(initialSelectionStart, initialSelectionEnd)
+    private var committedConnection: InputConnection? = null
+
+    fun updateSelection(start: Int, end: Int, composingStart: Int = -1, composingEnd: Int = -1): Boolean =
+        selection.updated(start, end, composingStart, composingEnd).also { if (it) onContextInvalidated() }
+
     override fun setComposingText(text: String) {
-        current()?.setComposingText(text, 1)
+        committedConnection = null
+        if (current()?.setComposingText(text, 1) == true) selection.replaced(text.length, composing = true)
+        else { selection.unknown(); onContextInvalidated() }
     }
 
     override fun finishComposingText() {
         current()?.finishComposingText()
+        selection.finishComposition()
     }
 
     override fun commitText(text: String) {
-        current()?.commitText(text, 1)
+        val connection = current()
+        committedConnection = null
+        if (connection?.commitText(text, 1) == true) {
+            selection.replaced(text.length, composing = false)
+            committedConnection = connection
+            onCommitted(text)
+        } else { selection.unknown(); onCommitted(null) }
+    }
+
+    override fun invalidateReconversion() { selection.invalidate(); committedConnection = null }
+
+    override fun reopenCommittedText(expectedText: String): Boolean {
+        onContextInvalidated()
+        if (expectedText.length !in 1..128) return false
+        val range = selection.verifiedRange(expectedText.length) ?: return false
+        val connection = current() ?: return false
+        if (connection !== committedConnection) { invalidateReconversion(); return false }
+        invalidateReconversion()
+        connection.beginBatchEdit()
+        return try {
+            val before = connection.getTextBeforeCursor(expectedText.length, 0) ?: return false
+            if (before.toString() != expectedText || current() !== connection) return false
+            if (!connection.setComposingRegion(range.start, range.end)) return false
+            selection.reopened(range)
+            true
+        } finally { connection.endBatchEdit() }
     }
 
     override fun deleteBeforeCursor() {
+        onContextInvalidated()
+        selection.unknown()
         val connection = current() ?: return
         val before = connection.getTextBeforeCursor(2, 0)?.toString().orEmpty()
         val deleteLength = if (
@@ -34,10 +75,15 @@ class AndroidEditorConnection(
         if (!connection.deleteSurroundingText(deleteLength, 0)) sendKey(connection, KeyEvent.KEYCODE_DEL)
     }
 
-    override fun performEditorAction(actionId: Int): Boolean =
-        current()?.performEditorAction(actionId) == true
+    override fun performEditorAction(actionId: Int): Boolean {
+        onContextInvalidated()
+        selection.invalidate()
+        return current()?.performEditorAction(actionId) == true
+    }
 
     override fun sendEnterKey() {
+        onContextInvalidated()
+        selection.unknown()
         current()?.let { sendKey(it, KeyEvent.KEYCODE_ENTER) }
     }
 

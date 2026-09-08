@@ -1,0 +1,58 @@
+package dev.zeroinput.ime.model
+
+import dev.zeroinput.engine.api.CandidateScorer
+import dev.zeroinput.ime.core.AsyncCandidateRanker
+import dev.zeroinput.ime.core.CommittedModelContext
+import dev.zeroinput.ime.core.InputSessionController
+
+/** Main-thread lifecycle adapter; asynchronous invalidation never reads controller or editor state. */
+class ModelRankingCoordinator(
+    createScorer: () -> CandidateScorer,
+    post: (Runnable) -> Boolean,
+    private val currentController: () -> InputSessionController?,
+    private val allowed: () -> Boolean,
+) : AutoCloseable {
+    private val context = CommittedModelContext()
+    private var lastRevision = -1L
+    private var frozen = true
+    private val ranker = AsyncCandidateRanker(createScorer, post, ::deliver)
+
+    @Synchronized fun invalidate() {
+        ranker.setEnabled(false)
+        ranker.cancel()
+        context.clear()
+        lastRevision = -1
+        frozen = true
+    }
+
+    @Synchronized fun interaction() { ranker.cancel(); frozen = true }
+
+    @Synchronized fun typing() { frozen = false }
+
+    @Synchronized fun committed(text: String?) {
+        ranker.cancel()
+        if (text == null || !allowed()) context.clear() else context.append(text)
+    }
+
+    @Synchronized fun refresh(surfaceAvailable: Boolean) {
+        if (!allowed()) { invalidate(); return }
+        ranker.setEnabled(true)
+        if (!surfaceAvailable || frozen) return
+        val controller = currentController() ?: return
+        val revision = controller.state.candidateRevision
+        if (lastRevision == revision) return
+        lastRevision = revision
+        ranker.cancel()
+        val candidates = controller.modelCandidates()
+        if (candidates.isEmpty()) return
+        val prefix = context.copy()
+        if (prefix.isEmpty()) return
+        ranker.request(revision, prefix, candidates.map { it.text.toCharArray() }.toTypedArray())
+    }
+
+    @Synchronized private fun deliver(revision: Long, winner: Int) {
+        if (allowed() && !frozen) currentController()?.applyModelWinner(revision, winner)
+    }
+
+    @Synchronized override fun close() { context.clear(); ranker.close() }
+}

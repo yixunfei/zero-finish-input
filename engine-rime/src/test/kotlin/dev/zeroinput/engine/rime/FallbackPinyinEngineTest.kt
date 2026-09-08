@@ -9,6 +9,47 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FallbackPinyinEngineTest {
+    @Test fun `input beyond the composition bound is returned to the controller without silent consumption`() {
+        val engine = FallbackPinyinEngine()
+        engine.restoreComposition("a".repeat(128))
+        val update = engine.handle(EngineKey.Character("b"))
+        assertFalse(update.consumed)
+        assertEquals(128, update.snapshot.rawInput.length)
+    }
+
+    @Test fun `paging reaches every prefix result and stops without repeats`() {
+        val engine = FallbackPinyinEngine()
+        engine.restoreComposition("z")
+        val seen = mutableSetOf<String>()
+        var pages = 0
+        do {
+            for (candidate in engine.snapshot.candidates) assertTrue(seen.add(candidate.text))
+            pages++
+        } while (engine.changePage(dev.zeroinput.engine.api.PageDirection.NEXT).consumed)
+        assertTrue(pages > 1)
+        assertTrue(seen.size > 8)
+        assertFalse(engine.snapshot.hasNextPage)
+    }
+
+    @Test fun `unknown phrase supports segment undo and complete canonical learning`() {
+        val engine = FallbackPinyinEngine()
+        engine.restoreComposition("ni'ai'hao")
+        engine.selectSyllable()
+        engine.selectCandidate(engine.snapshot.candidates.indexOfFirst { it.text == "你" })
+        assertEquals("你ai'hao", engine.snapshot.composition)
+        assertTrue(engine.snapshot.canUndoSelection)
+        engine.undoSelection()
+        assertEquals("ni'ai'hao", engine.snapshot.composition)
+        engine.selectSyllable()
+        engine.selectCandidate(engine.snapshot.candidates.indexOfFirst { it.text == "你" })
+        engine.selectCandidate(engine.snapshot.candidates.indexOfFirst { it.text == "爱" })
+        val update = engine.selectCandidate(engine.snapshot.candidates.indexOfFirst { it.text == "浩" })
+        assertEquals("你爱浩", update.committedText)
+        assertEquals("niaihao", update.committedInput)
+        assertTrue(update.learnable)
+        assertFalse(update.snapshot.isComposing)
+    }
+
     private val context = EditorContext(
         language = InputLanguage.CHINESE,
         isSensitive = false,

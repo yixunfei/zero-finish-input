@@ -4,6 +4,8 @@ Project source: https://github.com/yixunfei/zero-finish-input
 
 Initial release source: https://github.com/yixunfei/zero-finish-input/tree/v0.1.0
 
+Current release source: https://github.com/yixunfei/zero-finish-input/tree/v0.2.0
+
 The project's original source code is available under Apache-2.0. See LICENSE.
 Third-party software and data retain their own licenses. See THIRD_PARTY.md,
 NOTICE and LICENSES/ for attribution and complete license texts.
@@ -35,6 +37,12 @@ inside the APK. The independent project code retains Apache-2.0.
 
 Gradle dependency coordinates and versions are in gradle/libs.versions.toml.
 Android NDK runtime notices are in LICENSES/android-ndk-NOTICE.txt.
+
+Experimental Mini model source:
+https://huggingface.co/uer/roberta-mini-wwm-chinese-cluecorpussmall/tree/5e567169018f5cf84cf1d85a2b391c8d51211eda
+ONNX Runtime source: https://github.com/microsoft/onnxruntime/tree/v1.26.0
+The INT8 adaptation and reproducible asset preparation are described in
+docs/model-integration.md; host conversion code is tools/export-model-benchmark.py.
 
 Kaomoji data retains LGPL-3.0. The original category file is tracked at
 ime-ui/src/main/assets/expressions/rime-kaomoji-source.txt, with SHA-256

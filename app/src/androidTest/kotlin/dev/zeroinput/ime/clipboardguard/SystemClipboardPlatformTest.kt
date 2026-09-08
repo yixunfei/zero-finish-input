@@ -26,24 +26,33 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SystemClipboardPlatformTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val device = ClipboardDeviceTestSupport
 
     @Test
-    fun confirmationPageClearsOnlyAfterTheForegroundButtonIsPressed() = withObservedFixture(ClipboardClearMode.CONFIRM) { runtime, port ->
-        await { runtime.state.ticket != null }
-        val ticket = checkNotNull(runtime.state.ticket)
-        val context = instrumentation.targetContext
-        val activity = instrumentation.startActivitySync(Intent(context, ClipboardClearActivity::class.java)
-            .putExtra(ClipboardClearActivity.EXTRA_TICKET, ticket.id)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ClipboardClearActivity
-        try {
-            val label = context.getString(R.string.clipboard_guard_confirm_action)
-            await { instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label)?.isNotEmpty() == true }
-            assertEquals(ticket.timestamp, port.timestamp())
-            val button = instrumentation.uiAutomation.rootInActiveWindow.findAccessibilityNodeInfosByText(label).single()
-            assertTrue(button.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            await { runtime.state.status == ClipboardGuardStatus.CLEARED }
-            assertNull(port.timestamp())
-        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    fun confirmationPageClearsOnlyAfterTheForegroundButtonIsPressed() = withConfirmationFixture { runtime, port, _ ->
+        device.click(instrumentation.targetContext.getString(R.string.clipboard_guard_confirm_action))
+        await { runtime.state.status == ClipboardGuardStatus.CLEARED }
+        assertNull(port.timestamp())
+    }
+
+    @Test
+    fun cancellingConfirmationLeavesTheCurrentItemUntouched() = withConfirmationFixture { runtime, port, activity ->
+        val timestamp = checkNotNull(runtime.state.ticket).timestamp
+        device.click(instrumentation.targetContext.getString(R.string.cancel))
+        awaitFinished(activity)
+        assertTrue("Cancellation must preserve the public fixture", timestamp == port.timestamp())
+        assertEquals(ClipboardGuardStatus.CHANGED, runtime.state.status)
+    }
+
+    @Test
+    fun disablingMonitoringDismissesConfirmationWithoutClearing() = withConfirmationFixture { runtime, port, activity ->
+        val timestamp = checkNotNull(runtime.state.ticket).timestamp
+        val graph = (instrumentation.targetContext.applicationContext as ZeroInputApplication).graph
+        instrumentation.runOnMainSync { graph.clipboardGuardPreferences.options = ClipboardGuardOptions() }
+        awaitFinished(activity)
+        await { runtime.state.status == ClipboardGuardStatus.OFF }
+        assertTrue("Revoked monitoring must preserve the public fixture", timestamp == port.timestamp())
+        assertNull(runtime.state.ticket)
     }
 
     @Test
@@ -68,6 +77,7 @@ class SystemClipboardPlatformTest {
         val activity = instrumentation.startActivitySync(Intent(context, InputFixtureActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InputFixtureActivity
         try {
+            support.showFixtureKeyboard(activity)
             assumeTrue(port.timestamp() == null)
             support.withOverlayPermission(true) {
                 support.onMain { graph.clipboardGuardPreferences.options = ClipboardGuardOptions(
@@ -133,6 +143,31 @@ class SystemClipboardPlatformTest {
         }
     }
 
+    private fun withConfirmationFixture(test: (ClipboardGuardRuntime, SystemClipboardPort, ClipboardClearActivity) -> Unit) {
+        withObservedFixture(ClipboardClearMode.CONFIRM) { runtime, port ->
+            await { runtime.state.ticket != null }
+            val ticket = checkNotNull(runtime.state.ticket)
+            val context = instrumentation.targetContext
+            val activity = instrumentation.startActivitySync(Intent(context, ClipboardClearActivity::class.java)
+                .putExtra(ClipboardClearActivity.EXTRA_TICKET, ticket.id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ClipboardClearActivity
+            try {
+                val label = context.getString(R.string.clipboard_guard_confirm_action)
+                device.await {
+                    device.findText(label)?.window?.isFocused == true
+                }
+                assertTrue("Opening confirmation must preserve the public fixture", ticket.timestamp == port.timestamp())
+                test(runtime, port, activity)
+            } finally { instrumentation.runOnMainSync { activity.finish() } }
+        }
+    }
+
+    private fun awaitFinished(activity: ClipboardClearActivity) = await {
+        var finished = false
+        instrumentation.runOnMainSync { finished = activity.isFinishing }
+        finished
+    }
+
     private fun withObservedFixture(mode: ClipboardClearMode, test: (ClipboardGuardRuntime, SystemClipboardPort) -> Unit) {
         val context = instrumentation.targetContext
         val graph = (context.applicationContext as ZeroInputApplication).graph
@@ -146,17 +181,15 @@ class SystemClipboardPlatformTest {
         val port = AndroidSystemClipboard(context)
         var fixtureTimestamp: Long? = null
         try {
-            await {
-                var focused = false
-                instrumentation.runOnMainSync { focused = activity.hasWindowFocus() }
-                focused
-            }
+            device.showFixtureKeyboard(activity)
             val manager = context.getSystemService(ClipboardManager::class.java)
             assumeTrue("Never replace an existing clipboard", manager.primaryClipDescription == null)
             instrumentation.runOnMainSync {
                 graph.clipboardGuardPreferences.options = ClipboardGuardOptions(listening = true, clearMode = mode)
             }
-            await { graph.clipboardGuard.state.status == ClipboardGuardStatus.WAITING }
+            await(message = { "Monitoring did not start: ${graph.clipboardGuard.state.status}" }) {
+                graph.clipboardGuard.state.status == ClipboardGuardStatus.WAITING
+            }
             manager.setPrimaryClip(ClipData.newPlainText("", "public guard fixture"))
             fixtureTimestamp = port.timestamp()
             test(graph.clipboardGuard, port)
@@ -169,9 +202,9 @@ class SystemClipboardPlatformTest {
         }
     }
 
-    private fun await(condition: () -> Boolean) {
+    private fun await(message: () -> String = { "Platform flow did not settle" }, condition: () -> Boolean) {
         val deadline = SystemClock.elapsedRealtime() + 5_000
         while (!condition() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(10)
-        assertTrue("Platform flow did not settle", condition())
+        assertTrue(message(), condition())
     }
 }

@@ -36,7 +36,17 @@ class InputFixtureActivity : Activity() {
             }
         }
         editor.requestFocus()
-        editor.post { getSystemService(InputMethodManager::class.java).showSoftInput(editor, 0) }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        // The editor must be served by Android before requesting its IME on a cold launch.
+        editor.post {
+            if (hasWindowFocus() && !isFinishing && !isDestroyed) {
+                getSystemService(InputMethodManager::class.java).showSoftInput(editor, 0)
+            }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) { /* Fixture text is never saved. */ }

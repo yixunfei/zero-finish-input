@@ -20,8 +20,8 @@ android {
         applicationId = "dev.zeroinput.ime"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -48,6 +48,7 @@ android {
     }
 
     sourceSets["main"].assets.srcDir(licenseAssets)
+    sourceSets["androidTest"].assets.srcDir(rootProject.file("tools/model-quality-fixtures"))
 
     splits {
         abi {
@@ -70,6 +71,8 @@ android {
     }
 
     packaging {
+        // ONNX Runtime also ships x86; universal IME packages support only the three Rime ABIs.
+        jniLibs.excludes += "lib/x86/**"
         resources.excludes += setOf(
             "/META-INF/{AL2.0,LGPL2.1}",
             "/META-INF/DEPENDENCIES",
@@ -93,6 +96,7 @@ dependencies {
     implementation(project(":engine-rime"))
     implementation(project(":engine-dictionary"))
     implementation(project(":ime-core"))
+    implementation(project(":model-scoring"))
     implementation(project(":ime-ui"))
     implementation(project(":language-pack"))
     implementation(project(":security"))

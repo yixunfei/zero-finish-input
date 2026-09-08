@@ -4,6 +4,8 @@ import android.app.AppOpsManager
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.graphics.Rect
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -11,8 +13,10 @@ import android.os.Process
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.InputMethodManager
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.zeroinput.ime.R
+import dev.zeroinput.ime.testing.InputFixtureActivity
 import org.junit.Assert.assertTrue
 
 internal object ClipboardDeviceTestSupport {
@@ -32,21 +36,45 @@ internal object ClipboardDeviceTestSupport {
         checkNotNull(result).getOrThrow()
     }
 
-    fun await(condition: () -> Boolean) {
+    fun await(message: String = "Public fixture flow did not settle", condition: () -> Boolean) {
         val deadline = SystemClock.elapsedRealtime() + 6_000
         while (!condition() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(20)
-        assertTrue("Public fixture flow did not settle", condition())
+        assertTrue(message, condition())
     }
 
     fun flushGuardPreferences() {
         check(context.getSharedPreferences("clipboard-guard-settings", android.content.Context.MODE_PRIVATE).edit().commit())
     }
 
+    fun showFixtureKeyboard(activity: InputFixtureActivity) {
+        var nextRequestAt = 0L
+        await("Fixture keyboard did not become visible") {
+            var focused = false
+            onMain { focused = activity.hasWindowFocus() && activity.editor.hasFocus() }
+            val visible = focused && instrumentation.uiAutomation.windows.any {
+                it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.root?.packageName == context.packageName
+            }
+            val now = SystemClock.elapsedRealtime()
+            if (focused && !visible && now >= nextRequestAt) {
+                // Instrumentation restarts the IME process. Android can retain its old binding
+                // until a later input/show request triggers the platform reconnect timeout.
+                onMain {
+                    activity.getSystemService(InputMethodManager::class.java).apply {
+                        restartInput(activity.editor)
+                        showSoftInput(activity.editor, 0)
+                    }
+                }
+                nextRequestAt = now + 250
+            }
+            visible
+        }
+    }
+
     fun startSource() {
         val component = ComponentName(instrumentation.context.packageName, ExternalClipboardFixture::class.java.name)
         shell("am start -W -n ${component.flattenToString()} -f 0x10008000")
         await { findText("Copy public fixture") != null }
-        await { findText("Source ready") != null }
+        await { findText("Source ready")?.window?.isFocused == true }
         @Suppress("DEPRECATION")
         val source = context.packageManager.getApplicationInfo(instrumentation.context.packageName, 0)
         assertTrue("The source must have a different UID", source.uid != Process.myUid())
@@ -76,11 +104,44 @@ internal object ClipboardDeviceTestSupport {
     }
 
     fun longPressPublicText() {
-        val bounds = Rect()
-        checkNotNull(findText("public guard fixture")).getBoundsInScreen(bounds)
+        instrumentation.uiAutomation.waitForIdle(100, 6_000)
+        val bounds = settledPublicTextBounds()
         val x = bounds.left + minOf(bounds.width() / 2, (32 * context.resources.displayMetrics.density).toInt())
         val y = bounds.centerY()
-        shell("input touchscreen swipe $x $y $x $y ${ViewConfiguration.getLongPressTimeout() + 300}")
+        val downTime = SystemClock.uptimeMillis()
+        injectTouch(MotionEvent.ACTION_DOWN, downTime, x, y)
+        try {
+            SystemClock.sleep(ViewConfiguration.getLongPressTimeout() + 300L)
+        } finally {
+            injectTouch(MotionEvent.ACTION_UP, downTime, x, y)
+        }
+    }
+
+    private fun settledPublicTextBounds(): Rect {
+        val bounds = Rect()
+        var stableSince = SystemClock.elapsedRealtime()
+        await("Public text bounds must settle in the focused source window") {
+            val text = findText("public guard fixture")
+            val next = Rect()
+            text?.getBoundsInScreen(next)
+            val ready = text?.packageName == instrumentation.context.packageName &&
+                text.isVisibleToUser && text.window?.isFocused == true && !next.isEmpty
+            if (!ready || next != bounds) {
+                bounds.set(next)
+                stableSince = SystemClock.elapsedRealtime()
+            }
+            ready && SystemClock.elapsedRealtime() - stableSince >= 250
+        }
+        return bounds
+    }
+
+    private fun injectTouch(action: Int, downTime: Long, x: Int, y: Int) {
+        val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x.toFloat(), y.toFloat(), 0)
+        try {
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            // The public synchronous API waits for window animations and surface input updates.
+            assertTrue("Public gesture must be delivered", instrumentation.uiAutomation.injectInputEvent(event, true))
+        } finally { event.recycle() }
     }
 
     fun overlayWindows(): List<AccessibilityWindowInfo> = instrumentation.uiAutomation.windows.filter {

@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.graphics.drawable.toDrawable
 import dev.zeroinput.engine.api.Candidate
+import dev.zeroinput.engine.api.CandidateKind
 import com.google.android.material.color.MaterialColors
 
 internal class CandidateItemView(context: Context) : AppCompatTextView(context) {
@@ -51,8 +52,11 @@ internal class CandidateItemView(context: Context) : AppCompatTextView(context) 
         if (identity != updatedIdentity || index != visibleIndex) bindingRevision++
         identity = updatedIdentity
         index = visibleIndex
-        if (text != candidate.text) text = candidate.text
+        val label = if (candidate.kind == CandidateKind.RELATED_READING)
+            context.getString(R.string.related_candidate, candidate.text) else candidate.text
+        if (text != label) text = label
         contentDescription = context.getString(R.string.candidate_description, candidate.text)
+        androidx.appcompat.widget.TooltipCompat.setTooltipText(this, candidate.comment.takeIf(String::isNotBlank))
         isSelected = highlighted
     }
 
@@ -62,6 +66,7 @@ internal class CandidateItemView(context: Context) : AppCompatTextView(context) 
         index = -1
         text = ""
         contentDescription = null
+        androidx.appcompat.widget.TooltipCompat.setTooltipText(this, null)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
