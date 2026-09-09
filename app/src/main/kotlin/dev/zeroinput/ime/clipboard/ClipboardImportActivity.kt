@@ -16,7 +16,7 @@ import java.lang.ref.WeakReference
 import java.util.concurrent.RejectedExecutionException
 
 /** Untrusted input only: this component never lists vault contents or returns data. */
-class ClipboardImportActivity : AppCompatActivity() {
+open class ClipboardImportActivity : AppCompatActivity() {
     private val graph by lazy { (application as ZeroInputApplication).graph }
     private val worker = BoundedExecutors.singleThread("zeroinput-text-import", 1)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -36,7 +36,8 @@ class ClipboardImportActivity : AppCompatActivity() {
         setResult(RESULT_CANCELED)
         val incoming = intent
         intent = Intent()
-        if (savedInstanceState == null) request = ClipboardImportIntent.parse(incoming)
+        val draft = if (savedInstanceState == null) receiveDraft(incoming) else null
+        request = draft?.request
         incoming.replaceExtras(null as Bundle?)
         incoming.clipData = null
         if (request == null) {
@@ -44,7 +45,7 @@ class ClipboardImportActivity : AppCompatActivity() {
             finish()
             return
         }
-        vaultGeneration = graph.secureClipboard.captureGeneration()
+        vaultGeneration = checkNotNull(draft).generation
         screen = ClipboardImportView(this).also {
             it.onCancel = ::discardAndFinish
             it.onAction = ::performAction
@@ -56,6 +57,9 @@ class ClipboardImportActivity : AppCompatActivity() {
         }
         mainHandler.postDelayed(expire, DRAFT_TIMEOUT_MILLIS)
     }
+
+    internal open fun receiveDraft(intent: Intent): ClipboardImportDraft? =
+        ClipboardImportIntent.parse(intent)?.let { ClipboardImportDraft(it, graph.secureClipboard.captureGeneration()) }
 
     override fun onResume() {
         super.onResume()

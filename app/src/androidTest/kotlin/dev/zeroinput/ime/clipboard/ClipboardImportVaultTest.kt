@@ -91,6 +91,26 @@ class ClipboardImportVaultTest {
     }
 
     @Test
+    fun cancelledOrDeletedPasteDoesNotDecryptAndCancellationDuringDecryptionDiscardsTheResult() {
+        val body = MemoryStore()
+        val vault = SecureClipboardVault(body, MemoryStore())
+        val item = vault.add("", "public fixture", grant())
+        val generation = vault.captureGeneration()
+        val reads = body.reads
+        assertThrows(CancellationException::class.java) { vault.read(item.id, grant(), generation) { false } }
+        assertEquals(reads, body.reads)
+        var active = true
+        body.onRead = { active = false }
+        assertThrows(CancellationException::class.java) { vault.read(item.id, grant(), generation) { active } }
+        assertTrue(checkNotNull(body.lastRead).all { it == 0.toByte() })
+        body.onRead = {}
+        vault.clear(grant())
+        val readsAfterClear = body.reads
+        assertThrows(CancellationException::class.java) { vault.read(item.id, grant(), generation) }
+        assertEquals(readsAfterClear, body.reads)
+    }
+
+    @Test
     fun corruptionReadFailuresAndFailedWritesNeverReplaceExistingData() {
         val malformed = listOf("broken fixture", "{\"format\":2,\"entries\":[]}")
         for (data in malformed) {

@@ -112,7 +112,7 @@ internal class ClipboardGuardSettingsView(context: Context) : LinearLayout(conte
             modes.getValue(ClipboardClearMode.AUTOMATIC).isEnabled = !value.authenticate
             permission.visibility = if (value.notificationReminder && !notificationAllowed) VISIBLE else GONE
             permissionStatus.visibility = permission.visibility
-            clear.isEnabled = value == state.options && value.listening && state.status != ClipboardGuardStatus.NOT_DEFAULT
+            clear.isEnabled = value == state.options && value.listening
             retry.isEnabled = value.listening
             val visibleStatus = when {
                 !value.listening -> ClipboardGuardStatus.OFF

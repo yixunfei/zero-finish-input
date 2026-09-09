@@ -209,7 +209,7 @@ class InputPanelTest {
         var interactions = 0
         panel.onUserInteraction = { interactions++ }
         measure(panel, 320)
-        button(panel, "安全剪贴板").performClick()
+        button(panel, panel.context.getString(dev.zeroinput.ime.ui.R.string.secure_clipboard_open)).performClick()
         panel.renderSecureClipboard(false, emptyList())
         measure(panel, 320)
         assertLabelsFit(panel)

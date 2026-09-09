@@ -21,9 +21,13 @@
 - 常规用户数据和安全剪贴板使用不同的 Keystore 密钥。
 - librime 内建用户词典关闭，候选学习只通过加密的 `PersonalizationStore`。
 - 安全剪贴板默认关闭；读取由用户点击发起并要求系统身份认证。
-- 每次认证请求绑定发起时的输入会话、`InputConnection` 和用户交互序号。切换应用/输入框、结束
-  会话、设置/语言包/子类型变化或认证期间继续输入，都会使结果失效；认证回调、后台任务
-  启动和解密完成时各校验一次。
+- 私有片段粘贴采用认证与返回后确认两阶段。系统认证导航仅保留条目 ID、原编辑器公开标识、
+  删除代次和未消费授权，不保留正文或旧输入连接。返回源应用后用户必须在 30 秒内确认，
+  才绑定当前会话、实际 `InputConnection` 与交互序号并读取正文；读取前、完成后再次校验。
+  临时凭据编辑器不参与绑定。返回绑定后的输入、会话/面板切换以及设置或默认输入法变化使
+  待确认操作失效。字段 ID 和包名仅限制返回范围，不能证明编辑器身份，因而必须明确确认。
+  确认后收起键盘或收到意外选区变化同样取消后台读取；仓库取得串行锁后以及解密完成后再次
+  检查取消状态与删除代次，避免等待锁期间失效的请求仍读取正文。
 - 安全剪贴板不向 Android 系统剪贴板同步内容，也不导出内容 Provider 或管理组件。
 - 未认证面板只读取独立的无标签索引；安全剪贴板正文不会为生成列表摘要而解密。
 - 安全剪贴板正文解密、索引读取和 emoji 历史读取均在 IME 主线程之外执行；仅无正文的展示模型
@@ -69,8 +73,9 @@
 
 - Chinese preferences are immutable snapshots included in warm-up identity.
   Changing options invalidates old preparation results and authenticated actions.
-  Adopting a prepared engine also cancels pending authenticated actions before
-  ownership changes; an idle native-session release notification alone does not.
+  Adopting a prepared engine cancels queued editor writes before ownership changes.
+  An unused paste consent has no engine state and still requires a fresh user tap;
+  neither engine adoption nor an idle native-session release can trigger a paste.
   Non-private settings wait for the current composition to finish; privacy
   tightening still cancels composition and personalization immediately.
 - Generated Rime schemas contain only allowlisted switches and bounded pinyin
@@ -138,6 +143,18 @@
 
 ## Private text import boundary
 
+- The keyboard copy action reads only the active nonsensitive editor's explicitly
+  selected range. Known and returned lengths must match and remain within 8192
+  UTF-16 units. A bounded worker avoids blocking keys. Session/connection, selection,
+  interaction and settings changes cancel acceptance, including late IPC responses.
+- A frozen selection transfers once to a nonexported page through an opaque token;
+  the process-local slot expires after five seconds. No plaintext enters an Intent,
+  saved state or disk draft. The receiving page owns the captured import independently
+  of subsequent editor navigation, requires authentication then foreground Save,
+  and never rereads or writes back to the source editor. The original vault deletion
+  generation travels with the draft, so a clear during copying prevents a later save.
+  See ADR 0012. No vendor history erasure capability is inferred from these changes.
+
 - The exported text import Activity treats every Intent as untrusted. It accepts
   only PROCESS_TEXT/SEND text/plain payloads of at most 8,192 UTF-16 code units;
   malformed, blank, NUL-containing, URI/stream and unsupported payloads fail
@@ -176,10 +193,14 @@
   alone cannot clear. Confirmation carries an opaque, in-memory ticket and one-use
   grant, checks current metadata again, and expires on cancellation, new clipboard
   content, changed settings, recreation or leaving the page outside authentication.
-- Default-IME identity is checked before each platform operation. Disabling
+- Background operations check default-IME identity and a live service. Foreground
+  operations instead require a revocable window-focus lease and monitoring opt-in.
+  A page cannot grant background eligibility; losing focus revokes queued work.
+  Disabling
   monitoring, changing options, detaching the service and default-IME changes
   revoke the worker lease. Queued and delayed work cannot retain authorization.
-  Startup establishes a baseline without acting on preexisting content. Duplicate
+  Automatic startup processes the existing current item; other modes establish a
+  baseline without deletion. Duplicate
   callbacks and empty updates do not cause repeated clears.
 - An explicit foreground inspection can issue a fresh, user-requested ticket for
   an existing item even when no callback arrived. Inspection never auto-clears;
@@ -188,6 +209,15 @@
   Locked devices and explicit platform denials are distinguished from generic
   failures. A null metadata response is described as empty or unavailable, since
   public APIs do not consistently distinguish an empty clipboard from denial.
+- After explicit automatic-mode consent, the focused settings page can request
+  processing of the existing current item without another confirmation, including
+  with another keyboard selected. This request still requires the foreground lease
+  and current automatic options. Authentication cannot be combined with this mode.
+- Cleanup feedback reports a request for the current item and explicitly states
+  that history was not deleted. The confirmation and automatic-mode warnings name
+  system/keyboard history, pinned items and cloud copies. The platform clear API
+  returns no success receipt; a null metadata result is not proof of erasing any
+  independent history. No extra permission or cross-application deletion is added.
 - Android offers no atomic compare-and-clear. Timestamp checks reduce stale
   requests, but timestamps may collide and a new write between check and clear may
   also be erased. Callbacks cannot distinguish intentional Copy from an accident.

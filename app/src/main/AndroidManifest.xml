@@ -88,6 +88,15 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".clipboard.ClipboardSelectionImportActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.ZeroInput.PrivateImport"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+
         <service
             android:name=".ZeroInputService"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|locale|layoutDirection|uiMode"

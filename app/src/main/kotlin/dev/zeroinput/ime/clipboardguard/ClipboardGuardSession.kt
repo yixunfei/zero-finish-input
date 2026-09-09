@@ -5,6 +5,7 @@ internal class ClipboardGuardSession(
     private val clipboard: SystemClipboardPort,
     private val mayAccess: () -> Boolean,
     private val newId: () -> String,
+    private val mayMonitor: () -> Boolean = mayAccess,
 ) {
     var state = ClipboardGuardState()
         private set
@@ -15,11 +16,16 @@ internal class ClipboardGuardSession(
         state = ClipboardGuardState(normalized)
         lastTimestamp = null
         if (!normalized.listening) return
-        if (!mayAccess()) {
+        if (!mayMonitor()) {
             state = state.copy(status = ClipboardGuardStatus.UNAVAILABLE)
             return
         }
         try {
+            if (normalized.clearMode == ClipboardClearMode.AUTOMATIC) {
+                state = state.copy(status = ClipboardGuardStatus.WAITING)
+                changed()
+                return
+            }
             lastTimestamp = clipboard.timestamp()
             state = state.copy(status = ClipboardGuardStatus.WAITING)
         } catch (failure: RuntimeException) {
@@ -28,7 +34,7 @@ internal class ClipboardGuardSession(
     }
 
     fun changed() {
-        if (!state.options.listening || !mayAccess()) {
+        if (!state.options.listening || !mayMonitor()) {
             stop()
             return
         }
@@ -73,11 +79,13 @@ internal class ClipboardGuardSession(
     ): ClipboardClearResult {
         val ticket = state.ticket
         if (ticket == null || ticket.id != id || !state.options.listening ||
-            (state.options.clearMode == ClipboardClearMode.NONE && !ticket.userRequested) || !mayAccess() || !isActive()
+            (state.options.clearMode == ClipboardClearMode.NONE && !ticket.userRequested) ||
+            !mayAccess() || (!ticket.userRequested && !mayMonitor()) || !isActive()
         ) return ClipboardClearResult.EXPIRED
         if (state.options.authenticate && !authenticate()) return ClipboardClearResult.AUTHENTICATION_REQUIRED
         return try {
-            if (clipboard.timestamp() != ticket.timestamp || !mayAccess() || !isActive()) {
+            if (clipboard.timestamp() != ticket.timestamp || !mayAccess() ||
+                (!ticket.userRequested && !mayMonitor()) || !isActive()) {
                 state = state.copy(ticket = null, status = ClipboardGuardStatus.WAITING)
                 ClipboardClearResult.EXPIRED
             } else {

@@ -41,9 +41,41 @@ class ClipboardGuardRuntimeTest {
         assertEquals(0, fixture.created.get())
         assertEquals(null, fixture.port.listener.get())
         fixture.runtime.attachIme()
-        await { fixture.runtime.state.status == ClipboardGuardStatus.WAITING && fixture.port.listener.get() != null }
-        assertEquals(0, fixture.port.clears.get())
+        await { fixture.runtime.state.status == ClipboardGuardStatus.CLEARED && fixture.port.listener.get() != null }
+        assertEquals(1, fixture.port.clears.get())
         assertEquals(null, fixture.runtime.state.ticket)
+    }
+
+    @Test
+    fun nonDefaultForegroundRequestClearsWithoutStartingAMonitor() = withFixture { fixture ->
+        fixture.selected.set(false)
+        fixture.port.stamp = 42
+        fixture.configure(ClipboardGuardOptions(listening = true))
+        await { fixture.runtime.state.status == ClipboardGuardStatus.NOT_DEFAULT }
+        val inspected = AtomicReference<ClipboardGuardState>()
+        fixture.runtime.inspectCurrent({ true }, inspected::set)
+        await { inspected.get()?.ticket != null }
+        assertEquals(null, fixture.port.listener.get())
+        val outcome = AtomicReference<ClipboardClearResult>()
+        fixture.runtime.clear(checkNotNull(inspected.get().ticket).id, null, { true }, outcome::set)
+        await { outcome.get() != null }
+        assertEquals(ClipboardClearResult.CLEARED, outcome.get())
+        assertEquals(1, fixture.port.clears.get())
+        assertEquals(null, fixture.port.listener.get())
+    }
+
+    @Test
+    fun automaticProtectionClearsExistingItemWhileAnotherKeyboardIsSelectedAndPageIsFocused() = withFixture { fixture ->
+        fixture.selected.set(false)
+        fixture.port.stamp = 42
+        fixture.configure(ClipboardGuardOptions(listening = true, clearMode = ClipboardClearMode.AUTOMATIC))
+        await { fixture.runtime.state.status == ClipboardGuardStatus.NOT_DEFAULT }
+        val inspected = AtomicReference<ClipboardGuardState>()
+        fixture.runtime.inspectCurrent({ true }, inspected::set, automatic = true)
+        await { inspected.get() != null }
+        assertEquals(ClipboardGuardStatus.CLEARED, inspected.get().status)
+        assertEquals(1, fixture.port.clears.get())
+        assertEquals(null, fixture.port.listener.get())
     }
 
     @Test

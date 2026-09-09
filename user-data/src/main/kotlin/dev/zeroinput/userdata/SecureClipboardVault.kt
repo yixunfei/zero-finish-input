@@ -39,9 +39,17 @@ class SecureClipboardVault(
             }
     }
 
-    fun read(id: String, grant: AuthenticationGrant): String? = synchronized(lock) {
+    /** Revalidate after acquiring the vault lock; cancellation may occur while waiting. */
+    fun read(
+        id: String,
+        grant: AuthenticationGrant,
+        expectedGeneration: Long = captureGeneration(),
+        isActive: () -> Boolean = { true },
+    ): String? = synchronized(lock) {
+        checkOperationActive(expectedGeneration, isActive)
         require(grant.consume()) { "Authentication expired or was already used" }
         val entries = load()
+        checkOperationActive(expectedGeneration, isActive)
         entries.firstOrNull { it.id == id }?.value.also { value ->
             if (value == null) persistIndex(entries)
         }
@@ -64,7 +72,7 @@ class SecureClipboardVault(
         expectedGeneration: Long = captureGeneration(),
         isActive: () -> Boolean = { true },
     ): SecureClipboardMetadata = synchronized(lock) {
-        checkWriteActive(expectedGeneration, isActive)
+        checkOperationActive(expectedGeneration, isActive)
         require(grant.consume()) { "Authentication expired or was already used" }
         val cleanValue = validateValue(value)
         val entries = load().toMutableList()
@@ -76,8 +84,8 @@ class SecureClipboardVault(
             updatedAtEpochMillis = System.currentTimeMillis(),
         )
         entries += entry
-        checkWriteActive(expectedGeneration, isActive)
-        persist(entries) { checkWriteActive(expectedGeneration, isActive) }
+        checkOperationActive(expectedGeneration, isActive)
+        persist(entries) { checkOperationActive(expectedGeneration, isActive) }
         persistIndex(entries)
         entry.toMetadata()
     }
@@ -104,9 +112,9 @@ class SecureClipboardVault(
         }
     }
 
-    private fun checkWriteActive(expectedGeneration: Long, isActive: () -> Boolean) {
+    private fun checkOperationActive(expectedGeneration: Long, isActive: () -> Boolean) {
         if (generation.get() != expectedGeneration || !isActive() || Thread.currentThread().isInterrupted) {
-            throw CancellationException("Clipboard write cancelled")
+            throw CancellationException("Clipboard operation cancelled")
         }
     }
 

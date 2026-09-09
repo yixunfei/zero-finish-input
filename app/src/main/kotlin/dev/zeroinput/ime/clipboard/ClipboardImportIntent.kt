@@ -21,8 +21,6 @@ internal object ClipboardImportIntent {
         }
         val value = intent.getCharSequenceExtra(key) ?: return null
         if (value.length !in 1..SecureClipboardVault.MAX_VALUE_LENGTH) return null
-        if (value.isBlank() || value.any { it == '\u0000' }) return null
-        if (!hasValidSurrogates(value)) return null
         val clip = intent.clipData
         if (clip != null) {
             if (clip.itemCount != 1) return null
@@ -31,18 +29,6 @@ internal object ClipboardImportIntent {
             val duplicate = item.text ?: return null
             if (duplicate.length != value.length || duplicate.indices.any { duplicate[it] != value[it] }) return null
         }
-        // Copy characters only, dropping URL, image and other parcelled spans.
-        return ClipboardImportRequest(CharArray(value.length) { value[it] })
-    }
-
-    private fun hasValidSurrogates(text: CharSequence): Boolean {
-        var index = 0
-        while (index < text.length) {
-            val character = text[index++]
-            if (character.isHighSurrogate()) {
-                if (index == text.length || !text[index++].isLowSurrogate()) return false
-            } else if (character.isLowSurrogate()) return false
-        }
-        return true
+        return ClipboardImportText.parse(value)
     }
 }

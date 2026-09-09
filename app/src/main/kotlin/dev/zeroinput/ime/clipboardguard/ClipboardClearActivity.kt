@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ClipboardClearActivity : AppCompatActivity() {
     private val graph by lazy { (application as ZeroInputApplication).graph }
     private val active = AtomicBoolean(true)
+    private var focused = AtomicBoolean(false)
     private val main = Handler(Looper.getMainLooper())
     private var ticket = ""
     private var resumed = false
@@ -50,8 +51,14 @@ class ClipboardClearActivity : AppCompatActivity() {
 
     override fun onPause() {
         resumed = false
+        focused.set(false)
         if (!authenticating) cancelAndFinish()
         super.onPause()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) focused.set(false)
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); cancelAndFinish() }
@@ -83,6 +90,11 @@ class ClipboardClearActivity : AppCompatActivity() {
                         filterTouchesWhenObscured = true
                         setOnClickListener {
                             if (resumed && alert.window?.decorView?.hasWindowFocus() == true && !busy && valid()) {
+                                focused.set(false)
+                                focused = AtomicBoolean(true)
+                                alert.window?.decorView?.viewTreeObserver?.addOnWindowFocusChangeListener { hasFocus ->
+                                    if (!hasFocus) focused.set(false)
+                                }
                                 if (requiresAuthentication && grant == null) authenticate() else clear()
                             }
                         }
@@ -115,7 +127,8 @@ class ClipboardClearActivity : AppCompatActivity() {
         grant = null
         val owner = WeakReference(this)
         val requestActive = active
-        graph.clipboardGuard.clear(ticket, authorization, requestActive::get) { outcome ->
+        val requestFocused = focused
+        graph.clipboardGuard.clear(ticket, authorization, { requestActive.get() && requestFocused.get() }) { outcome ->
             owner.get()?.let { activity ->
                 if (activity.resumed && !activity.isFinishing) {
                     Toast.makeText(activity, when (outcome) {
@@ -133,6 +146,7 @@ class ClipboardClearActivity : AppCompatActivity() {
 
     private fun cancel() {
         active.set(false)
+        focused.set(false)
         grant = null
         authentication?.close()
         authentication = null

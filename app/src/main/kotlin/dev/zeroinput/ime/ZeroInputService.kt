@@ -19,7 +19,6 @@ import dev.zeroinput.engine.api.ChineseInputOptions
 import dev.zeroinput.engine.api.ChineseKeyboardLayout
 import dev.zeroinput.ime.settings.ChineseEngineChoice
 import dev.zeroinput.engine.rime.RimeRuntimeState
-import dev.zeroinput.ime.auth.AuthenticationBroker
 import dev.zeroinput.ime.concurrency.BoundedExecutors
 import dev.zeroinput.ime.core.InputCommand
 import dev.zeroinput.ime.core.InputSessionController
@@ -55,6 +54,7 @@ class ZeroInputService : InputMethodService() {
     private var controller: InputSessionController? = null
     private var editorConnection: AndroidEditorConnection? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val selectionReader = dev.zeroinput.ime.clipboard.ClipboardSelectionReader({ mainHandler.post(it) })
     private val modelRanking = dev.zeroinput.ime.model.ModelRankingCoordinator(
         createScorer = { dev.zeroinput.model.RobertaMiniScorer(applicationContext) },
         post = { mainHandler.post(it) },
@@ -109,7 +109,7 @@ class ZeroInputService : InputMethodService() {
     private var nativeRetryRequested = false
     @Volatile
     private var secureClipboardRequest: SecureClipboardRequest? = null
-    private var secureClipboardAuth: AuthenticationBroker.RequestHandle? = null
+    private var pasteConsentObserver: AutoCloseable? = null
     /**
      * Invalidates asynchronous writes when the active privacy/session
      * context changes.  It is deliberately independent from the UI
@@ -128,6 +128,7 @@ class ZeroInputService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        pasteConsentObserver = graph.securePaste.observe { bindPasteConsent(authenticationFinished = true) }
         expressionObserver = graph.observeExpressions {
             mainHandler.post {
                 personalExpressionCache = PersonalExpressionsUi()
@@ -324,6 +325,7 @@ class ZeroInputService : InputMethodService() {
         syncSessionPrivacy()
         reconcileChineseOptions()
         inputView?.let(::renderLocalPanels)
+        bindPasteConsent()
     }
 
     private fun updateNavigationBarAppearance() {
@@ -349,6 +351,10 @@ class ZeroInputService : InputMethodService() {
         controller?.invalidateReconversion()
         inputView?.cancelPendingGestures()
         inputViewActive = false
+        cancelSecureClipboardRequest()
+        graph.securePaste.leaveEditor()
+        inputView?.renderPasteConfirmation(false)
+        inputView?.renderCopySelectionAvailable(false)
         invalidatePendingPersonalization()
         clearLocalPanelCaches()
         inputView?.renderExpressions(false, PersonalExpressionsUi(), emptyList())
@@ -365,6 +371,9 @@ class ZeroInputService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        pasteConsentObserver?.close()
+        pasteConsentObserver = null
+        graph.securePaste.leaveEditor()
         modelRanking.close()
         expressionObserver?.close()
         expressionObserver = null
@@ -391,6 +400,7 @@ class ZeroInputService : InputMethodService() {
         engineWarmupCoordinator = null
         cancelSecureClipboardRequest()
         secureClipboardExecutor.shutdownNow()
+        selectionReader.close()
         BoundedExecutors.purge(secureClipboardExecutor)
         localPanelTask?.cancel(true)
         BoundedExecutors.purge(localDataExecutor)
@@ -408,6 +418,8 @@ class ZeroInputService : InputMethodService() {
         candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         if (editorConnection?.updateSelection(newSelStart, newSelEnd, candidatesStart, candidatesEnd) == true) {
+            cancelSecureClipboardRequest()
+            graph.securePaste.editorChanged(pasteEditorIdentity())
             controller?.clearModelRanking()
             controller?.invalidateReconversion()
         }
@@ -516,6 +528,9 @@ class ZeroInputService : InputMethodService() {
             }
         }
         view.onSecureClipboardSelected = ::unlockAndCommitSecureItem
+        view.onCopySelectionRequested = ::copySelectedText
+        view.onPasteConfirmed = ::confirmSecurePaste
+        view.onPasteCancelled = { registerInteraction(); inputView?.returnToKeyboard() }
         view.onSettingsRequested = {
             registerInteraction()
             launchActivity(MainActivity::class.java)
@@ -691,54 +706,98 @@ class ZeroInputService : InputMethodService() {
         val connection = currentInputConnection ?: return
         val boundConnection = session.connectionBinding.resolve(connection) ?: return
         if (!isSessionActive(session, boundConnection)) return
-        if (secureClipboardRequest != null) return
+        val source = pasteEditorIdentity() ?: return
+        graph.securePaste.request(id, source)
+    }
 
-        val request = SecureClipboardRequest(
-            id = id,
-            session = session,
-            connection = boundConnection,
-            interaction = interactionSequence,
-        )
+    private fun bindPasteConsent(authenticationFinished: Boolean = false) {
+        if (!inputViewActive) return
+        val session = activeSession ?: return
+        val identity = pasteEditorIdentity()
+        // The OS credential screen may itself start a temporary sensitive editor.
+        // It never receives a grant or a paste control; bind only after return.
+        if (graph.securePaste.deferBinding(identity, authenticationFinished)) return
+        if (identity == null || session.controller.state.privacy.isSensitive) cancelPasteConsent()
+        else inputView?.renderPasteConfirmation(graph.securePaste.bind(session.token, identity))
+    }
+
+    private fun pasteEditorIdentity(): dev.zeroinput.ime.clipboard.PasteEditorIdentity? =
+        currentInputEditorInfo?.let { info -> info.packageName?.let { name ->
+            dev.zeroinput.ime.clipboard.PasteEditorIdentity(name, info.fieldId, info.inputType)
+        } }
+
+    private fun confirmSecurePaste() {
+        syncSessionPrivacy()
+        val session = activeSession ?: return
+        val connection = session.connectionBinding.resolve(currentInputConnection) ?: return
+        val identity = pasteEditorIdentity() ?: return
+        if (!inputViewActive || session.controller.state.privacy.isSensitive) { cancelPasteConsent(); return }
+        val consent = graph.securePaste.confirm(session.token, identity) ?: return
+        val grant = consent.grant
+        val id = consent.id
+        val generation = consent.generation
+        registerInteraction()
+        val request = SecureClipboardRequest(id, session, connection, interactionSequence)
         secureClipboardRequest = request
-        secureClipboardAuth = AuthenticationBroker.requestCancellable(this) authCallback@{ grant ->
-            if (secureClipboardRequest !== request) return@authCallback
-            secureClipboardAuth = null
-            if (grant == null || !graph.settings.secureClipboardEnabled ||
-                !isSessionActive(request.session, request.connection) ||
-                request.interaction != interactionSequence
-            ) {
-                secureClipboardRequest = null
-                return@authCallback
-            }
-            runCatching {
-                val task = secureClipboardExecutor.submit {
-                    if (secureClipboardRequest !== request ||
-                        !graph.settings.secureClipboardEnabled ||
-                        !isSessionActive(request.session, request.connection)
-                    ) return@submit
-                    val result = runCatching { graph.secureClipboard.read(request.id, grant) }
-                    mainHandler.post {
-                        if (secureClipboardRequest !== request) return@post
-                        secureClipboardRequest = null
-                        if (!isSessionActive(request.session, request.connection) ||
-                            !graph.settings.secureClipboardEnabled ||
-                            request.interaction != interactionSequence
-                        ) return@post
-                        val value = result.getOrNull()
-                        if (value == null) {
-                            Toast.makeText(this, R.string.operation_failed, Toast.LENGTH_SHORT).show()
-                            inputView?.let(::renderLocalPanels)
-                            return@post
-                        }
-                        request.session.controller.reset()
-                        if (!isSessionActive(request.session, request.connection)) return@post
-                        request.connection.commitText(value, 1)
+        try {
+            request.task = secureClipboardExecutor.submit {
+                if (secureClipboardRequest !== request || !isSessionActive(session, connection) ||
+                    !graph.settings.secureClipboardEnabled || generation != graph.secureClipboard.captureGeneration()) return@submit
+                val result = runCatching {
+                    graph.secureClipboard.read(id, grant, generation) {
+                        secureClipboardRequest === request && isSessionActive(session, connection)
+                    }
+                }
+                mainHandler.post {
+                    if (secureClipboardRequest !== request) return@post
+                    secureClipboardRequest = null
+                    if (!isSessionActive(session, connection) || interactionSequence != request.interaction ||
+                        !graph.settings.secureClipboardEnabled || generation != graph.secureClipboard.captureGeneration()) return@post
+                    val value = result.getOrNull()
+                    if (value == null) Toast.makeText(this, R.string.operation_failed, Toast.LENGTH_SHORT).show()
+                    else {
+                        session.controller.reset()
+                        if (isSessionActive(session, connection)) connection.commitText(value, 1)
                         inputView?.returnToKeyboard()
                     }
                 }
-                request.task = task
-            }.onFailure {
-                clearSecureClipboardRequest(request)
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { clearSecureClipboardRequest(request) }
+    }
+
+    private fun cancelPasteConsent() {
+        graph.securePaste.cancel()
+        inputView?.renderPasteConfirmation(false)
+    }
+
+    private fun copySelectedText() {
+        registerInteraction()
+        syncSessionPrivacy()
+        val session = activeSession ?: return
+        if (!inputViewActive || session.controller.state.privacy.isSensitive) return
+        val connection = session.connectionBinding.resolve(currentInputConnection) ?: return
+        val length = editorConnection?.selectedLength() ?: 0
+        val interaction = interactionSequence
+        val generation = graph.secureClipboard.captureGeneration()
+        val settingsGeneration = personalizationWriteGeneration.get()
+        selectionReader.read(length, { connection.getSelectedText(0) }, {
+            inputViewActive && isSessionActive(session, connection) && interactionSequence == interaction &&
+                personalizationWriteGeneration.get() == settingsGeneration &&
+                !session.controller.state.privacy.isSensitive && editorConnection?.selectedLength() == length
+        }) { draft ->
+            if (draft == null) {
+                Toast.makeText(this, R.string.clipboard_selection_unavailable, Toast.LENGTH_SHORT).show()
+            } else {
+                val transfer = graph.clipboardSelectionTransfer
+                val token = transfer.offer(dev.zeroinput.ime.clipboard.ClipboardImportDraft(draft, generation))
+                try {
+                    startActivity(Intent(this, dev.zeroinput.ime.clipboard.ClipboardSelectionImportActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        .putExtra(dev.zeroinput.ime.clipboard.ClipboardSelectionImportActivity.EXTRA_TOKEN, token))
+                } catch (_: RuntimeException) {
+                    transfer.close()
+                    Toast.makeText(this, R.string.operation_failed, Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -751,6 +810,7 @@ class ZeroInputService : InputMethodService() {
         // editor.  This prevents an accidental secure-clipboard paste into a
         // credential field while preserving the feature in ordinary editors.
         val enabled = session != null && graph.settings.secureClipboardEnabled && !sensitive
+        view.renderCopySelectionAvailable(inputViewActive && session != null && !sensitive)
         if (!personalizationAllowed) recentEmojiCache = emptyList()
         if (!personalizationAllowed || personalExpressionRevision != graph.expressions.revision()) {
             personalExpressionCache = PersonalExpressionsUi()
@@ -894,9 +954,10 @@ class ZeroInputService : InputMethodService() {
                 }
                 var transferred = false
                 try {
-                    // Authentication must not outlive the engine state that authorized it.
+                    // Engine replacement revokes editor writes. An unused paste consent
+                    // contains no engine state and still requires a new foreground tap.
                     modelRanking.invalidate()
-                    registerInteraction()
+                    registerInteraction(preservePasteConsent = true)
                     transferred = session.controller.adoptPreparedEngine(result.engine)
                     if (transferred) {
                         installedEngineWarmupContext = result.request
@@ -962,7 +1023,8 @@ class ZeroInputService : InputMethodService() {
 
     private fun endInputSession(reset: Boolean) {
         inputView?.cancelPendingGestures()
-        registerInteraction()
+        registerInteraction(preservePasteConsent = true)
+        graph.securePaste.leaveEditor()
         nativeRetryRequested = false
         invalidatePendingPersonalization()
         cancelEngineWarmup(clearInstalled = true)
@@ -1105,9 +1167,10 @@ class ZeroInputService : InputMethodService() {
 
     /** Records an interaction and cancels work that was authorized in an
      * older UI state.  All callers run on the IME main thread. */
-    private fun registerInteraction(preserveReconversion: Boolean = false) {
+    private fun registerInteraction(preserveReconversion: Boolean = false, preservePasteConsent: Boolean = false) {
         modelRanking.interaction()
         interactionSequence++
+        if (!preservePasteConsent) cancelPasteConsent()
         cancelSecureClipboardRequest()
         if (!preserveReconversion) controller?.invalidateReconversion()
     }
@@ -1119,8 +1182,7 @@ class ZeroInputService : InputMethodService() {
     }
 
     private fun cancelSecureClipboardRequest() {
-        secureClipboardAuth?.close()
-        secureClipboardAuth = null
+        selectionReader.cancel()
         secureClipboardRequest?.task?.cancel(true)
         BoundedExecutors.purge(secureClipboardExecutor)
         secureClipboardRequest = null
@@ -1138,8 +1200,6 @@ class ZeroInputService : InputMethodService() {
 
     private fun clearSecureClipboardRequest(request: SecureClipboardRequest) {
         if (secureClipboardRequest === request) {
-            secureClipboardAuth?.close()
-            secureClipboardAuth = null
             request.task?.cancel(true)
             BoundedExecutors.purge(secureClipboardExecutor)
             secureClipboardRequest = null

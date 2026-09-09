@@ -16,6 +16,7 @@ import dev.zeroinput.security.AuthenticationGrant
 class SecureClipboardUnlockActivity : AppCompatActivity() {
     private var requestId = ""
     private var completed = false
+    private var finishedGrant: AuthenticationGrant? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,10 +30,14 @@ class SecureClipboardUnlockActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        if (!completed && !isChangingConfigurations && requestId.isNotEmpty()) {
-            AuthenticationBroker.complete(requestId, null)
-        }
         super.onDestroy()
+        // A prompt can succeed before its Activity has stopped covering the editor.
+        // Deliver only after this navigation ends, so return binding cannot attach
+        // to the transient editor exposed while the credential page is closing.
+        if (!isChangingConfigurations && requestId.isNotEmpty()) {
+            AuthenticationBroker.complete(requestId, if (completed) finishedGrant else null)
+        }
+        finishedGrant = null
     }
 
     private fun authenticate() {
@@ -94,7 +99,7 @@ class SecureClipboardUnlockActivity : AppCompatActivity() {
     private fun complete(grant: AuthenticationGrant?) {
         if (completed) return
         completed = true
-        AuthenticationBroker.complete(requestId, grant)
+        finishedGrant = grant
         finish()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, 0, 0)

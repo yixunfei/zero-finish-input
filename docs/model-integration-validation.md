@@ -144,6 +144,44 @@ follow-up did not rebuild ARM/Release APKs or repeat model performance measureme
 The subsequent [v0.2.0 release validation](releases/v0.2.0-validation.md) records
 the new-version three-ABI rebuild, public package checks and device rerun.
 
+The later [clipboard history report follow-up](clipboard-device-validation.md#history-report-follow-up-2026-09-09)
+clarifies the reported surviving records in the bundled and Baidu keyboards.
+These current-item tests do not establish saved-history erasure. Cleanup feedback
+now explicitly excludes history. Advice to delete records in the storing app did
+not meet the user's request; the implementation follow-up below supersedes that advice.
+
+## Clipboard product repair follow-up (2026-09-09)
+
+The subsequent repair adds a visible keyboard selection-copy command, processes
+preexisting current clips in explicitly enabled automatic mode, and allows focused
+current-item cleanup without switching the default keyboard. Device-credential
+authentication now uses the user-approved return-and-confirm paste flow; an
+authentication callback cannot decrypt or insert a snippet. The returned explicit
+tap binds a fresh actual editor connection, with cancellation and deletion checks
+before reading and committing.
+
+The prior automatic-paste failure and a queued-paste race were reproduced with
+public fixtures: the Android 16 credential page unbound the original connection;
+an editor change while the vault was busy could still allow a late paste. The
+new flow preserves only a short-lived unused consent across authentication, and
+editor changes/keyboard hiding revoke pending reads. The vault also rechecks
+cancellation after acquiring its lock. See
+[current device evidence](clipboard-device-validation.md#product-repair-and-authenticated-return-2026-09-09)
+and [ADR 0012](adr/0012-keyboard-private-copy-and-foreground-cleanup.md).
+
+These repairs do not establish deletion of the iQOO Neo9's long-press clipboard
+history. No physical iQOO or supported vendor deletion interface is available;
+the history requirement remains unmet, and manual deletion is not an acceptance
+substitute. Model quality and performance gaps above remain unchanged.
+
+Final API 36 validation passed 17 authentication/vault/layout tests and 51
+clipboard/input/encryption regressions, with no failures or skips. Packaging
+passed 352 JVM tests, privacyCheck, Lint, both merged-manifest checks and ARM64
+APK validation. Authentication result delivery waits until the authentication
+Activity is destroyed, avoiding premature return binding during its exit.
+The final local test package and SHA-256 are recorded in the device evidence
+linked above. These changes have not been published to the existing release.
+
 ## Original integration deliverables (2026-09-08)
 
 Debug-signed test artifacts are in

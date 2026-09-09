@@ -23,6 +23,8 @@ class ClipboardGuardSettingsActivity : AppCompatActivity() {
     private lateinit var screen: ClipboardGuardSettingsView
     private var observer: AutoCloseable? = null
     private var foreground = AtomicBoolean(false)
+    private var focused = AtomicBoolean(false)
+    private var automaticChecked = false
     private var checking = false
     private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { render() }
     private val overlayPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { render() }
@@ -56,7 +58,16 @@ class ClipboardGuardSettingsActivity : AppCompatActivity() {
 
     override fun onPause() {
         foreground.set(false)
+        focused.set(false)
+        automaticChecked = false
         super.onPause()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        focused.set(false)
+        focused = AtomicBoolean(hasFocus && foreground.get())
+        if (hasFocus) protectCurrentIfAutomatic()
     }
 
     override fun onDestroy() {
@@ -104,9 +115,9 @@ class ClipboardGuardSettingsActivity : AppCompatActivity() {
     private fun inspectCurrent() {
         if (checking || !foreground.get() || !window.decorView.hasWindowFocus()) return
         checking = true
-        val active = foreground
+        val active = focused
         val owner = WeakReference(this)
-        graph.clipboardGuard.inspectCurrent(active::get) { state ->
+        graph.clipboardGuard.inspectCurrent(active::get, { state ->
             owner.get()?.let { activity ->
                 activity.checking = false
                 if (active.get() && activity.window.decorView.hasWindowFocus()) {
@@ -116,12 +127,13 @@ class ClipboardGuardSettingsActivity : AppCompatActivity() {
                     } else Toast.makeText(activity, state.statusText(), Toast.LENGTH_LONG).show()
                 }
             }
-        }
+        })
     }
 
     private fun applyOptions(next: ClipboardGuardOptions) {
         val requestPermission = next.notificationReminder && !graph.clipboardGuardPreferences.options.notificationReminder
         graph.clipboardGuardPreferences.options = next
+        automaticChecked = false
         render()
         if (requestPermission && !ClipboardGuardNotifications(this).allowed()) requestNotificationPermission()
     }
@@ -138,5 +150,16 @@ class ClipboardGuardSettingsActivity : AppCompatActivity() {
         if (!::screen.isInitialized || isFinishing || isDestroyed) return
         screen.render(graph.clipboardGuardPreferences.options, graph.clipboardGuard.state,
             ClipboardGuardNotifications(this).allowed(), Settings.canDrawOverlays(this))
+        protectCurrentIfAutomatic()
+    }
+
+    private fun protectCurrentIfAutomatic() {
+        if (!foreground.get() || !focused.get() || checking || automaticChecked || isFinishing) return
+        val options = graph.clipboardGuardPreferences.options
+        if (!options.listening || options.clearMode != ClipboardClearMode.AUTOMATIC ||
+            graph.clipboardGuard.state.options != options) return
+        automaticChecked = true
+        val active = focused
+        graph.clipboardGuard.inspectCurrent(active::get, {}, automatic = true)
     }
 }

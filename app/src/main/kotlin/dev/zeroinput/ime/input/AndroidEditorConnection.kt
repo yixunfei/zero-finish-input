@@ -15,6 +15,8 @@ class AndroidEditorConnection(
     private val selection = EditorSelectionState(initialSelectionStart, initialSelectionEnd)
     private var committedConnection: InputConnection? = null
 
+    fun selectedLength(): Int? = selection.selectedLength()
+
     fun updateSelection(start: Int, end: Int, composingStart: Int = -1, composingEnd: Int = -1): Boolean =
         selection.updated(start, end, composingStart, composingEnd).also { if (it) onContextInvalidated() }
 

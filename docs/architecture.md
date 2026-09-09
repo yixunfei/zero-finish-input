@@ -38,8 +38,8 @@ readings; nine-key retains its original native flow. Personal query pages are
 prepared on the existing serial worker and never decrypt on key dispatch.
 
 1. `ZeroInputService` 是唯一输入法服务并持有当前输入会话。每个会话都有单调递增的令牌，
-   安全剪贴板认证请求同时绑定令牌、原始 `InputConnection` 和发起时的交互序号；任一项变化都会
-   取消认证后的待提交操作。
+   安全剪贴板在认证后返回编辑器，由用户再次确认时绑定当前令牌、实际 `InputConnection` 和
+   交互序号；任一项变化都会取消待提交操作。认证导航期间仅保留短时的未消费授权，见下文。
 2. `InputSessionController` 根据编辑器类型应用隐私策略，再将按键交给当前引擎。设置变化会在
    当前会话的下一次交互和输入视图恢复时重新求值；若权限收紧，会取消组合文本并重建引擎状态。
    `onStartInput` 先安装纯内存的轻量降级引擎，不在 IME 主线程创建 Rime 会话或扫描语言包。
@@ -56,7 +56,7 @@ prepared on the existing serial worker and never decrypt on key dispatch.
    会话或隐私策略变化以及清除个性化数据时都会提升队列代次，使此前排队但尚未执行的学习写入
    失效，并立即隐藏旧候选；用户主动清除还会删除用户词组和 emoji 历史各自的 Keystore 密钥。
 5. emoji 最近记录与安全剪贴板无标签索引由后台线程读取并缓存。安全剪贴板正文只在一次性认证
-   成功后于专用后台线程解密，回到主线程前再次校验输入会话与交互序号；设置、语言包、
+   成功且用户返回确认后于专用后台线程解密，回到主线程前再次校验输入会话与交互序号；设置、语言包、
    子类型或个性化状态变化也会使尚未完成的认证请求失效。emoji 写入带有清除代次，用户清除
    数据后，已经排队但尚未执行的历史写入不会复活。
    引擎预热、个性化写入、索引刷新和认证读取均使用有限容量队列；取消任务后清理已排队的
@@ -83,6 +83,29 @@ The existing AuthenticationBroker issues a one-use grant; a subsequent foregroun
 Save action schedules the addition on a bounded worker. No authentication callback
 persists data by itself, and callers receive no result data.
 
+The keyboard's explicit copy-selection control reads the active editor through
+`ClipboardSelectionReader` on a bounded worker. Selection length, session,
+connection and interaction/settings generation are rechecked before accepting
+the result. `ClipboardSelectionTransfer` hands one frozen draft and its original
+vault deletion generation to the nonexported `ClipboardSelectionImportActivity`
+using a one-use token; text is not placed in the Intent. The transfer expires
+after five seconds. The internal page reuses the import authentication/save
+flow and owns the draft after handoff; it never rereads the source editor.
+
+`SecurePasteCoordinator` owns a pending item ID, source editor metadata, deletion
+generation and an unused one-use grant across system-authentication navigation.
+It retains no IME, InputConnection or plaintext. Once the source editor returns,
+`SecurePasteConsent` binds that new session for a visible Confirm paste action.
+Only that action transfers the grant to a worker read bound to the actual current
+connection and interaction sequence. The unused grant expires within 30 seconds;
+settings/default-IME changes cancel it. Leaving or editing after return binding
+also cancels. Programmatic panel resets and background engine adoption do not
+count as new user confirmation, and never cause a paste. See ADR 0012.
+
+The authentication Activity completes the broker handoff after its destruction,
+so a successful prompt cannot bind a source editor while authentication navigation
+is still exiting. Cancellation and timeouts remain valid during that handoff.
+
 `user-data/SecureClipboardVault` still owns the encrypted format and serializes
 reads/writes. It accepts the existing security EncryptedStore port for isolated
 tests. Additions capture a deletion generation before queuing and check it and
@@ -103,11 +126,15 @@ fixed-height ime-ui reminder. Clipboard work and initial guard preference loadin
 never run on the input thread; settings are read as one atomic value snapshot.
 Preferences, default-IME changes and service detachment invalidate the worker's
 lease before queued destructive operations can run. Event and refresh wake-ups
-are coalesced; clear submissions are bounded to one. Subscription startup records
-only a baseline and ignores existing content. A foreground inspection command can
+are coalesced; clear submissions are bounded to one. Automatic-mode startup also
+processes existing content; other modes only record a baseline. A foreground inspection command can
 create a confirmation ticket for an existing item, even if no callback arrived.
 That ticket permits explicit cleanup in the otherwise observation-only mode;
-inspection itself never triggers automatic clearing. Runtime tests inject a synthetic
+inspection itself never triggers automatic clearing. A separate automatic request
+from the focused settings page applies the already selected automatic policy to
+an existing item. Foreground operations use a revocable focus lease, independent
+of default-IME identity; background callbacks still require a selected, attached
+IME. Runtime tests inject a synthetic
 metadata port and default-IME predicate without accessing the platform clipboard.
 
 The nonexported settings and clear Activities expose separate reminder, cleanup

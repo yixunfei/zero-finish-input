@@ -92,4 +92,12 @@
     <string name="key_next">Next</string>
     <string name="key_done">Done</string>
     <string name="key_previous">Prev</string>
+    <string name="secure_clipboard_copy_selection">Copy selection to ZeroInput</string>
+    <string name="secure_clipboard_disabled">Private clipboard is disabled</string>
+    <string name="secure_clipboard_empty">No private snippets</string>
+    <string name="secure_clipboard_manage">Manage private clipboard</string>
+    <string name="secure_clipboard_open">Private clipboard</string>
+    <string name="secure_clipboard_confirm_hint">Check the current input field before pasting the selected snippet</string>
+    <string name="secure_clipboard_confirm_paste">Confirm paste</string>
+    <string name="secure_clipboard_cancel_paste">Cancel paste</string>
 </resources>

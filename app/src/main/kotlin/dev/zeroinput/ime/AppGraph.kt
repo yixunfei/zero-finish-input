@@ -58,6 +58,8 @@ class AppGraph(context: Context) : AutoCloseable {
         return AutoCloseable { expressionListeners -= listener }
     }
     val secureClipboard = SecureClipboardVault(applicationContext)
+    internal val securePaste = dev.zeroinput.ime.clipboard.SecurePasteCoordinator(applicationContext, settings, secureClipboard)
+    internal val clipboardSelectionTransfer = dev.zeroinput.ime.clipboard.ClipboardSelectionTransfer()
     val languagePacks = LanguagePackInstaller(applicationContext)
     val languagePackRegistry = LanguagePackRegistry(languagePacks)
     val rime = RimeEngineFactory(applicationContext)
@@ -215,6 +217,8 @@ class AppGraph(context: Context) : AutoCloseable {
         listOf(rime.descriptor, dictionaryEngine.descriptor, english.descriptor) + languagePackRegistry.descriptors()
 
     override fun close() {
+        securePaste.close()
+        clipboardSelectionTransfer.close()
         clipboardGuard.close()
         engineExecutor.shutdownNow()
         queuedPersonalization.close()

@@ -63,6 +63,46 @@ class SystemClipboardPlatformTest {
     }
 
     @Test
+    fun openingAutomaticProtectionWithAnotherKeyboardClearsTheExistingCurrentItem() {
+        val context = instrumentation.targetContext
+        val graph = (context.applicationContext as ZeroInputApplication).graph
+        val original = graph.clipboardGuardPreferences.options
+        val originalIme = Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+        val other = device.shell("ime list -s").lineSequence().map(String::trim)
+            .firstOrNull { it.contains('/') && it != originalIme }
+        assumeTrue(!original.listening && other != null)
+        val activity = instrumentation.startActivitySync(Intent(context, InputFixtureActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as InputFixtureActivity
+        val port = AndroidSystemClipboard(context)
+        var page: android.app.Activity? = null
+        var timestamp: Long? = null
+        try {
+            device.showFixtureKeyboard(activity)
+            assumeTrue(port.timestamp() == null)
+            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("", "public guard fixture"))
+            timestamp = port.timestamp()
+            assertNotNull(timestamp)
+            device.shell("ime set $other")
+            device.onMain { graph.clipboardGuardPreferences.options = ClipboardGuardOptions(
+                listening = true, clearMode = ClipboardClearMode.AUTOMATIC) }
+            await { graph.clipboardGuard.state.status == ClipboardGuardStatus.NOT_DEFAULT }
+            page = instrumentation.startActivitySync(Intent(context, ClipboardGuardSettingsActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            await { graph.clipboardGuard.state.status == ClipboardGuardStatus.CLEARED }
+            assertNull(port.timestamp())
+            assertEquals(other, Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD))
+        } finally {
+            device.onMain { graph.clipboardGuardPreferences.options = original }
+            await { graph.clipboardGuard.state.status == ClipboardGuardStatus.OFF }
+            if (timestamp != null && port.timestamp() == timestamp) port.clear()
+            device.shell("ime set $originalIme")
+            device.onMain { page?.finish(); activity.finish() }
+            device.flushGuardPreferences()
+        }
+    }
+
+
+    @Test
     fun copyingInADifferentApplicationClearsTheCurrentItemAndCanShowAnOverlay() {
         val support = ClipboardDeviceTestSupport
         val context = instrumentation.targetContext

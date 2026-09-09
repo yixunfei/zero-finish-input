@@ -37,6 +37,9 @@ class ZeroInputView @JvmOverloads constructor(
     var onExpressionFavoriteRequested: (EmojiEntry, Boolean) -> Unit = { _, _ -> }
     var onExpressionManagementRequested: (String?) -> Unit = {}
     var onSecureClipboardSelected: (String) -> Unit = {}
+    var onCopySelectionRequested: () -> Unit = {}
+    var onPasteConfirmed: () -> Unit = {}
+    var onPasteCancelled: () -> Unit = {}
     var onSettingsRequested: () -> Unit = {}
     var onClipboardGuardRequested: () -> Unit = {}
     var onSecureClipboardManagementRequested: () -> Unit = {}
@@ -192,7 +195,7 @@ class ZeroInputView @JvmOverloads constructor(
         manualTools = false
         emoji.clearSession()
         keyboard.startEditor(options)
-        showMode(PanelMode.KEYBOARD)
+        showMode(PanelMode.KEYBOARD, userInitiated = false)
     }
 
     fun setKeyboardHeight(height: KeyboardHeight) {
@@ -254,6 +257,9 @@ class ZeroInputView @JvmOverloads constructor(
         onExpressionFavoriteRequested = { _, _ -> }
         onExpressionManagementRequested = {}
         onSecureClipboardSelected = {}
+        onCopySelectionRequested = {}
+        onPasteConfirmed = {}
+        onPasteCancelled = {}
         onSettingsRequested = {}
         onClipboardGuardRequested = {}
         onSecureClipboardManagementRequested = {}
@@ -275,6 +281,8 @@ class ZeroInputView @JvmOverloads constructor(
         readings.render(currentSnapshot)
         emoji.clearSession()
         secureClipboard.render(false, emptyList())
+        secureClipboard.renderCopyAvailable(false)
+        secureClipboard.renderPasteConfirmation(false)
     }
 
     fun renderExpressions(allowed: Boolean, data: PersonalExpressionsUi, recent: List<String>) {
@@ -285,6 +293,13 @@ class ZeroInputView @JvmOverloads constructor(
 
     fun renderSecureClipboard(enabled: Boolean, items: List<SecureClipboardItemUi>) {
         secureClipboard.render(enabled, items)
+    }
+
+    fun renderCopySelectionAvailable(available: Boolean) { secureClipboard.renderCopyAvailable(available) }
+
+    fun renderPasteConfirmation(visible: Boolean) {
+        secureClipboard.renderPasteConfirmation(visible)
+        if (visible) showMode(PanelMode.SECURE_CLIPBOARD, userInitiated = false)
     }
 
     fun returnToKeyboard() {
@@ -300,7 +315,7 @@ class ZeroInputView @JvmOverloads constructor(
         addView(scriptButton)
         addView(layoutButton)
         addView(toolbarButton("☺", context.getString(R.string.expression_smileys)) { toggleMode(PanelMode.EMOJI) })
-        addView(toolbarButton("🔒", "安全剪贴板") { toggleMode(PanelMode.SECURE_CLIPBOARD) })
+        addView(toolbarButton("🔒", context.getString(R.string.secure_clipboard_open)) { toggleMode(PanelMode.SECURE_CLIPBOARD) })
         addView(Space(context).apply { layoutParams = LayoutParams(0, 1, 1f) })
         // The return control replaces the layout switch while a secondary panel is open.
         addView(returnButton)
@@ -334,6 +349,9 @@ class ZeroInputView @JvmOverloads constructor(
         emoji.onSearchModeChanged = { searchActive -> updateEmojiSearchLayout(searchActive) }
         emoji.onUserInteraction = { onUserInteraction() }
         secureClipboard.onItemSelected = { onSecureClipboardSelected(it) }
+        secureClipboard.onCopySelectionRequested = { onCopySelectionRequested() }
+        secureClipboard.onPasteConfirmed = { onPasteConfirmed() }
+        secureClipboard.onPasteCancelled = { onPasteCancelled() }
         secureClipboard.onManageRequested = {
             onUserInteraction()
             onSecureClipboardManagementRequested()

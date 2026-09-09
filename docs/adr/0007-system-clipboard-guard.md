@@ -2,6 +2,9 @@
 
 Status: accepted
 
+Foreground authorization and automatic startup were updated by
+[ADR 0012](0012-keyboard-private-copy-and-foreground-cleanup.md).
+
 ## Context
 
 Users can accidentally invoke a source application's ordinary Copy action. An
@@ -25,7 +28,8 @@ forbid body reads everywhere. Existing private-vault access remains unchanged.
 
 Monitoring requires explicit opt-in, a live IME service and default-IME identity.
 Work is serialized on a bounded worker, separate from the input thread. Initial
-registration establishes a baseline without cleaning existing content. Duplicate
+registration processes the existing current item in explicitly enabled automatic
+mode; other modes establish a baseline without cleanup. Duplicate
 classification callbacks and self-generated empty updates do not loop. Settings,
 service and default-IME changes invalidate pending work before queued cleanup.
 

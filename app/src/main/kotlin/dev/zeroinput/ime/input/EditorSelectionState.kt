@@ -47,6 +47,10 @@ internal class EditorSelectionState(start: Int, end: Int) {
         pending.isEmpty() && observed == Selection(it.end, it.end) && it.end - it.start == length
     }
 
+    fun selectedLength(): Int? = observed.takeIf {
+        pending.isEmpty() && it == predicted && it.start >= 0 && it.end >= 0 && it.start != it.end
+    }?.let { kotlin.math.abs(it.end - it.start) }
+
     fun reopened(range: CommitRange) {
         committed = null
         composingStart = range.start

@@ -20,6 +20,21 @@ class SecureClipboardPanelView @JvmOverloads constructor(
 ) : ScrollView(context, attrs) {
     var onItemSelected: (String) -> Unit = {}
     var onManageRequested: () -> Unit = {}
+    var onCopySelectionRequested: () -> Unit = {}
+    var onPasteConfirmed: () -> Unit = {}
+    var onPasteCancelled: () -> Unit = {}
+    private var pasteConfirmation = false
+    private var enabled = false
+    private var items = emptyList<SecureClipboardItemUi>()
+    private val copySelection = MaterialButton(context).apply {
+        setText(R.string.secure_clipboard_copy_selection)
+        isAllCaps = false
+        minHeight = dp(48)
+        isEnabled = false
+        filterTouchesWhenObscured = true
+        layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+        setOnClickListener { onCopySelectionRequested() }
+    }
 
     private val list = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -32,13 +47,41 @@ class SecureClipboardPanelView @JvmOverloads constructor(
     }
 
     fun render(enabled: Boolean, items: List<SecureClipboardItemUi>) {
+        this.enabled = enabled
+        this.items = items
         list.removeAllViews()
+        if (pasteConfirmation) {
+            addStatus(context.getString(R.string.secure_clipboard_confirm_hint))
+            addCommand(R.string.secure_clipboard_confirm_paste) { onPasteConfirmed() }
+            addCommand(R.string.secure_clipboard_cancel_paste) { onPasteCancelled() }
+            return
+        }
+        list.addView(copySelection)
         when {
-            !enabled -> addStatus("安全剪贴板未启用")
-            items.isEmpty() -> addStatus("暂无安全片段")
+            !enabled -> addStatus(context.getString(R.string.secure_clipboard_disabled))
+            items.isEmpty() -> addStatus(context.getString(R.string.secure_clipboard_empty))
             else -> items.forEach(::addItem)
         }
         list.addView(manageButton())
+    }
+
+    fun renderCopyAvailable(available: Boolean) { copySelection.isEnabled = available }
+
+    fun renderPasteConfirmation(visible: Boolean) {
+        if (pasteConfirmation == visible) return
+        pasteConfirmation = visible
+        render(enabled, items)
+    }
+
+    private fun addCommand(label: Int, action: () -> Unit) {
+        list.addView(MaterialButton(context).apply {
+            setText(label)
+            minHeight = dp(48)
+            isAllCaps = false
+            filterTouchesWhenObscured = true
+            layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            setOnClickListener { action() }
+        })
     }
 
     private fun addStatus(value: String) {
@@ -71,7 +114,7 @@ class SecureClipboardPanelView @JvmOverloads constructor(
 
     private fun manageButton() = MaterialButton(context).apply {
         text = "⚙"
-        contentDescription = "管理安全剪贴板"
+        contentDescription = context.getString(R.string.secure_clipboard_manage)
         textSize = 20f
         setTextColor(resolveColor(com.google.android.material.R.attr.colorOnSurface, Color.BLACK))
         isAllCaps = false

@@ -23,19 +23,19 @@ class ClipboardGuardSessionTest {
     }
 
     @Test
-    fun enablingMonitoringEstablishesABaselineWithoutClearingExistingContent() {
+    fun automaticProtectionClearsPreexistingContentAndIgnoresDuplicateEmptyCallbacks() {
         val fixture = Fixture()
         fixture.port.stamp = 1
         fixture.policy.start(ClipboardGuardOptions(listening = true, clearMode = ClipboardClearMode.AUTOMATIC))
         fixture.policy.changed()
-        assertEquals(0, fixture.port.clears)
+        assertEquals(1, fixture.port.clears)
         assertNull(fixture.policy.state.ticket)
         fixture.port.stamp = 2
         fixture.policy.changed()
-        assertEquals(1, fixture.port.clears)
+        assertEquals(2, fixture.port.clears)
         fixture.policy.changed()
         fixture.policy.changed()
-        assertEquals(1, fixture.port.clears)
+        assertEquals(2, fixture.port.clears)
     }
 
     @Test
@@ -157,14 +157,38 @@ class ClipboardGuardSessionTest {
     fun manualInspectionFindsPreexistingContentAndRequiresAnotherActionEvenInAutomaticMode() {
         for (mode in ClipboardClearMode.entries) {
             val fixture = Fixture()
-            fixture.port.stamp = 10
             fixture.policy.start(ClipboardGuardOptions(listening = true, clearMode = mode))
+            fixture.port.stamp = 10
             val inspected = fixture.policy.inspectCurrent { true }
             val ticket = checkNotNull(inspected.ticket)
             assertTrue(ticket.userRequested)
             assertEquals(0, fixture.port.clears)
             assertEquals(ClipboardClearResult.CLEARED, fixture.policy.clear(ticket.id))
         }
+    }
+
+    @Test
+    fun foregroundLeaseDoesNotEnableBackgroundMonitoring() {
+        val port = FakeClipboard().apply { stamp = 7 }
+        val policy = ClipboardGuardSession(port, { true }, { "foreground" }, { false })
+        policy.start(ClipboardGuardOptions(listening = true, clearMode = ClipboardClearMode.AUTOMATIC))
+        assertEquals(0, port.reads)
+        policy.changed()
+        assertEquals(0, port.reads)
+        val ticket = checkNotNull(policy.inspectCurrent { true }.ticket)
+        assertEquals(0, port.clears)
+        assertEquals(ClipboardClearResult.CLEARED, policy.clear(ticket.id, isActive = { true }))
+        assertEquals(1, port.clears)
+    }
+
+    @Test
+    fun losingForegroundWhileCheckingTheItemPreventsDeletion() {
+        val fixture = prepared()
+        val ticket = checkNotNull(fixture.policy.inspectCurrent { true }.ticket)
+        var active = true
+        fixture.port.onRead = { active = false }
+        assertEquals(ClipboardClearResult.EXPIRED, fixture.policy.clear(ticket.id, isActive = { active }))
+        assertEquals(0, fixture.port.clears)
     }
 
     @Test

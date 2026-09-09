@@ -70,7 +70,7 @@ internal class ClipboardGuardRuntime(
 
     fun previewOverlay(result: (Boolean) -> Unit) { main.post { result(overlay.preview(options)) } }
 
-    fun inspectCurrent(isActive: () -> Boolean, result: (ClipboardGuardState) -> Unit) {
+    fun inspectCurrent(isActive: () -> Boolean, result: (ClipboardGuardState) -> Unit, automatic: Boolean = false) {
         if (closed.get() || !inspectQueued.compareAndSet(false, true)) {
             main.post { result(state.copy(ticket = null)) }
             return
@@ -82,7 +82,11 @@ internal class ClipboardGuardRuntime(
                     main.post { result(state.copy(ticket = null)) }
                 } else {
                     val policy = session ?: newSession().also { session = it; it.start(options) }
-                    val next = policy.inspectCurrent(isActive)
+                    val inspected = policy.inspectCurrent(isActive)
+                    if (automatic && inspected.options.clearMode == ClipboardClearMode.AUTOMATIC) {
+                        inspected.ticket?.let { policy.clear(it.id, isActive = isActive) }
+                    }
+                    val next = policy.state
                     if (expected == revision.get() && isActive()) publish(next, announce = false)
                     main.post { result(if (expected == revision.get() && isActive()) next else next.copy(ticket = null)) }
                 }
@@ -161,7 +165,7 @@ internal class ClipboardGuardRuntime(
         val policy = newSession()
         session = policy
         policy.start(current)
-        if (policy.state.status == ClipboardGuardStatus.WAITING && mayAccess()) {
+        if (policy.state.status in setOf(ClipboardGuardStatus.WAITING, ClipboardGuardStatus.CLEARED) && mayMonitor()) {
             val registeredRevision = lease
             registration = checkNotNull(clipboard).listen { queueEvent(registeredRevision) }
             // Recheck after registration to cover a change between baseline and subscription.
@@ -176,7 +180,7 @@ internal class ClipboardGuardRuntime(
             eventQueued.set(false)
             // A replacement registration may share this coalesced wake-up.
             if (lease == revision.get()) {
-                if (!mayAccess()) reconfigure() else {
+                if (!mayMonitor()) reconfigure() else {
                     session?.changed()
                     session?.let { publish(it.state) }
                 }
@@ -186,15 +190,18 @@ internal class ClipboardGuardRuntime(
 
     private fun newSession(): ClipboardGuardSession {
         val port = clipboard ?: createClipboard().also { clipboard = it }
-        return ClipboardGuardSession(port, ::mayAccess) { UUID.randomUUID().toString() }
+        return ClipboardGuardSession(port, ::mayAccess, { UUID.randomUUID().toString() }, ::mayMonitor)
     }
 
-    private fun mayAccess(): Boolean = options.listening && lease == revision.get() && isDefaultIme()
+    private fun mayAccess(): Boolean = !closed.get() && options.listening && lease == revision.get()
+
+    private fun mayMonitor(): Boolean = mayAccess() && imeAttached.get() && isDefaultIme()
 
     private fun publish(next: ClipboardGuardState, announce: Boolean = true) {
         val expected = lease
         if (closed.get() || next.options != options || expected != revision.get()) return
         if (next.ticket != null && !mayAccess()) return
+        if (next.ticket != null && !next.ticket.userRequested && !mayMonitor()) return
         val previous = state
         state = next
         if (next != previous) {

@@ -2,6 +2,9 @@
 
 Status: accepted
 
+Extended by [ADR 0012](0012-keyboard-private-copy-and-foreground-cleanup.md)
+with a keyboard selection snapshot and a nonexported internal import entry.
+
 ## Context
 
 Users need to collect selected text without first copying it into Android's
